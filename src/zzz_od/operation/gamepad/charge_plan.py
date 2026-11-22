@@ -99,6 +99,8 @@ def validate_macos_charge_plan(config: ChargePlanConfig) -> str | None:
         for field, values in supported.items():
             if plan.category_name in ('区域巡防', '专业挑战室', '恶名狩猎') and field in ('mission_type_name', 'card_num'):
                 continue
+            if plan.category_name == '区域巡防' and field == 'level':
+                values = ('默认等级', '等级Lv.60')
             value = getattr(plan, field)
             if value not in values:
                 return (

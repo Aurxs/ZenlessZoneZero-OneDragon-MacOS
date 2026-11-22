@@ -32,3 +32,10 @@ added_areas:
   - 700
   - 1820
   - 900
+- area_name: 手柄-挑战等级数值
+  area_type: none
+  pc_rect:
+  - 1580
+  - 25
+  - 1720
+  - 75
