@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import time
 from typing import TYPE_CHECKING
+
+import numpy as np
 
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -94,6 +97,7 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         self._detail_frame_time: float = 0
         self._next_frame_time: float = 0
         self._ready_frame_time: float = 0
+        self._seen_frame_digests: set[bytes] = set()
         self._proof_started: float = 0
 
     def _plan_identity(self) -> tuple[str | int | None, ...]:
@@ -113,12 +117,19 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         self._detail_frame_time = 0
         self._next_frame_time = 0
         self._ready_frame_time = 0
+        self._seen_frame_digests.clear()
         self._proof_started = 0
 
     def _fresh_frame(self) -> bool:
         """仅接受最近五秒内实际采集的帧，不接受未来或无时间戳的帧。"""
         age = time.time() - self.last_screenshot_time
         return self.last_screenshot is not None and 0 <= age <= 5
+
+    def _frame_digest(self) -> bytes | None:
+        """逐字节比较实际采集图像，时间戳变化不能让同一帧变新。"""
+        if not isinstance(self.last_screenshot, np.ndarray) or not self.last_screenshot.size:
+            return None
+        return hashlib.blake2b(self.last_screenshot.tobytes(), digest_size=16).digest()
 
     def _proof_valid(self) -> bool:
         """编队页面不含等级，因此仅接续两分钟内本场详情证明。"""
@@ -227,6 +238,12 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
             self._level_confirmed = self._level_matches()
             if not self._level_confirmed:
                 return self.round_fail('未确认要求的区域巡防Lv.60，未进入编队或出战')
+            if self.plan.level != '默认等级':
+                digest = self._frame_digest()
+                if not self._fresh_frame() or digest is None:
+                    self._clear_level_proof()
+                    return self.round_fail('区域巡防详情截图无效或已过期，未进入编队')
+                self._seen_frame_digests.add(digest)
             self._detail_frame_time = self.last_screenshot_time
             return self.round_success('驱动盘副本已确认')
         return self.round_retry('等待区域巡防详情', wait=1)
@@ -243,6 +260,11 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         if not self._fresh_frame():
             self._clear_level_proof()
             return self.round_fail('区域巡防截图过期或无效，未允许出战')
+        digest = self._frame_digest()
+        if digest is None or digest in self._seen_frame_digests:
+            self._clear_level_proof()
+            return self.round_fail('区域巡防截图无效或重复，未允许出战')
+        self._seen_frame_digests.add(digest)
         if self._deployment_visible():
             if not self._proof_valid() or self.last_screenshot_time <= self._next_frame_time:
                 self._clear_level_proof()
@@ -292,10 +314,13 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
             return self.round_fail('本场计划已变化，停止区域巡防')
         if self.plan.level == '默认等级':
             return super().deploy()
+        digest = self._frame_digest()
         if (not self._fresh_frame() or not self._proof_valid() or not self._ready_frame_time
-                or self.last_screenshot_time <= self._ready_frame_time):
+                or self.last_screenshot_time <= self._ready_frame_time or digest is None
+                or digest in self._seen_frame_digests):
             self._clear_level_proof()
             return self.round_fail('本场Lv.60证明或出战帧缺失、过期，未允许出战')
+        self._seen_frame_digests.add(digest)
         if not self._deployment_visible():
             return self.round_retry('等待出战准备页', wait=1)
         if self._deploy_sent:
