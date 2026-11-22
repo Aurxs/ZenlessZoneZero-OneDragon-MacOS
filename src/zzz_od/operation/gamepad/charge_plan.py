@@ -59,6 +59,10 @@ if TYPE_CHECKING:
 
 def validate_macos_charge_plan(config: ChargePlanConfig) -> str | None:
     """检查所有保存的计划，不把未支持的任务替换成调查专项。"""
+    if (config.restore_charge != RestoreChargeEnum.NONE.value.value
+            and any(plan.category_name == '区域巡防' and plan.level == '等级Lv.60'
+                    for plan in config.plan_list)):
+        return '显式Lv.60区域巡防不允许自动恢复电量'
     if config.restore_charge != RestoreChargeEnum.NONE.value.value:
         from zzz_od.operation.gamepad.restore_reserve_charge import reserve_budget
 
@@ -336,6 +340,9 @@ class GamepadChargePlan(GamepadOperation):
         self.current_charge = current
         self.run_record.record_current_charge_power(current)
         if current < required:
+            if (self.current_plan is not None and self.current_plan.category_name == '区域巡防'
+                    and self.current_plan.level == '等级Lv.60'):
+                return self.round_success(self.STATUS_CHARGE_NOT_ENOUGH)
             if self.config.restore_charge == RestoreChargeEnum.BACKUP_ONLY.value.value:
                 if self.current_plan is None or self.current_plan.category_name != '区域巡防':
                     return self.round_fail('最小储蓄补电仅支持已核对的普通巡防')
@@ -347,6 +354,9 @@ class GamepadChargePlan(GamepadOperation):
     @operation_node(name='执行最小储蓄补电', screenshot_before_round=False, timeout_seconds=260)
     def restore_minimum_reserve(self) -> OperationRoundResult:
         """补电和独立对账后重新从原计划选取，绝不增加胜利次数。"""
+        if (self.current_plan is not None and self.current_plan.category_name == '区域巡防'
+                and self.current_plan.level == '等级Lv.60'):
+            return self.round_fail('显式Lv.60区域巡防不允许自动恢复电量')
         from zzz_od.operation.gamepad.restore_reserve_charge import (
             GamepadRestoreReserveCharge,
         )
@@ -381,6 +391,9 @@ class GamepadChargePlan(GamepadOperation):
         if self.round_by_find_area(
             self.last_screenshot, '大世界-普通', '快捷手册'
         ).is_success:
+            if (self.current_plan is not None and self.current_plan.category_name == '区域巡防'
+                    and self.current_plan.level == '等级Lv.60'):
+                return self._summary('电量不足，未完成计划保留')
             if self.config.skip_plan and self.current_plan is not None and self.current_charge is not None:
                 following = self.config.get_next_plan(self.current_plan)
                 while following is not None:

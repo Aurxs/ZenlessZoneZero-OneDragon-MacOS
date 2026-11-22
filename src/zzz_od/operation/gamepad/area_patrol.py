@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 import time
 from typing import TYPE_CHECKING
-
-import numpy as np
 
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -97,7 +94,8 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         self._detail_frame_time: float = 0
         self._next_frame_time: float = 0
         self._ready_frame_time: float = 0
-        self._seen_frame_digests: set[bytes] = set()
+        self._last_frame_time: float = 0
+        self._next_sent_at: float = 0
         self._proof_started: float = 0
 
     def _plan_identity(self) -> tuple[str | int | None, ...]:
@@ -117,7 +115,8 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         self._detail_frame_time = 0
         self._next_frame_time = 0
         self._ready_frame_time = 0
-        self._seen_frame_digests.clear()
+        self._last_frame_time = 0
+        self._next_sent_at = 0
         self._proof_started = 0
 
     def _fresh_frame(self) -> bool:
@@ -125,11 +124,12 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         age = time.time() - self.last_screenshot_time
         return self.last_screenshot is not None and 0 <= age <= 5
 
-    def _frame_digest(self) -> bytes | None:
-        """逐字节比较实际采集图像，时间戳变化不能让同一帧变新。"""
-        if not isinstance(self.last_screenshot, np.ndarray) or not self.last_screenshot.size:
-            return None
-        return hashlib.blake2b(self.last_screenshot.tobytes(), digest_size=16).digest()
+    def _new_frame(self) -> bool:
+        """控制器返回同一缓存帧时保留原采集时间，不能当成新观察。"""
+        if not self._fresh_frame() or self.last_screenshot_time <= self._last_frame_time:
+            return False
+        self._last_frame_time = self.last_screenshot_time
+        return True
 
     def _proof_valid(self) -> bool:
         """编队页面不含等级，因此仅接续两分钟内本场详情证明。"""
@@ -146,20 +146,29 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
     def handle_resume(self) -> None:
         """暂停期间游戏可能变化，恢复后不能沿用旧页面证明。"""
         self._clear_level_proof()
+        super().handle_resume()
 
-    def _level_matches(self) -> bool:
-        """显式等级只接受独立数值区域的完整读数，不把六十电量当等级。"""
-        if self.plan.level == '默认等级':
-            return True
+    def _level_state(self) -> str:
+        """未读到等待；唯一明确错误或多候选立即拒绝。"""
         if self.plan.level != '等级Lv.60':
-            return False
+            return 'invalid'
         area = read_preset_area(self.ctx, self.last_screenshot, '手柄-挑战等级数值', '区域巡防')
-        if area is None or len(area[1]) != 1:
-            return False
+        if area is None or not area[1]:
+            return 'wait'
+        if len(area[1]) != 1:
+            return 'invalid'
         text, matches = next(iter(area[1].items()))
         if len(matches) != 1:
-            return False
-        return re.fullmatch(r'(?:等级)?[Ll][Vv]\.60', text.replace(' ', '').strip()) is not None
+            return 'invalid'
+        value = text.replace(' ', '').strip()
+        match = re.fullmatch(r'(?:等级)?[Ll][Vv]\.(\d{1,3})', value)
+        if match is None:
+            return 'wait'
+        return 'ok' if match[1] == '60' else 'invalid'
+
+    def _level_matches(self) -> bool:
+        """仅用于只读识别；默认等级保持既有行为。"""
+        return self.plan.level == '默认等级' or self._level_state() == 'ok'
 
     @property
     def expected_charge(self) -> int:
@@ -183,25 +192,57 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         selected, _ = read_focused_choice(self.ctx, self.last_screenshot, '手柄-副本列表', charge_mission_names('区域巡防'), '区域巡防', border_gap=35, allow_corner_gap=True)
         return selected == self.plan.mission_type_name
 
-    def _charge(self) -> tuple[int, int] | None:
-        """显式等级要求电量区只有一个完整读数，不合并多个候选。"""
-        if self.plan.level == '默认等级':
-            return super()._charge()
+    def _target_state(self) -> str:
+        """目标标题和唯一焦点都须吻合；缺失等待，明确冲突拒绝。"""
+        area = read_preset_area(self.ctx, self.last_screenshot, '手柄-副本标题', '区域巡防')
+        if area is None or not area[1]:
+            return 'wait'
+        if len(area[1]) != 1:
+            return 'invalid'
+        text, matches = next(iter(area[1].items()))
+        if len(matches) != 1:
+            return 'invalid'
+        name = text.replace(' ', '')
+        names = charge_mission_names('区域巡防')
+        if name != self.plan.mission_type_name:
+            return 'invalid' if name in names else 'wait'
+        selected, _ = read_focused_choice(
+            self.ctx, self.last_screenshot, '手柄-副本列表', names, '区域巡防',
+            border_gap=35, allow_corner_gap=True,
+        )
+        if selected is None:
+            return 'wait'
+        return 'ok' if selected == self.plan.mission_type_name else 'invalid'
+
+    def _charge_state(self) -> tuple[str, tuple[int, int] | None]:
+        """只接受唯一完整费用；可识别的冲突立即拒绝，缺读数等待。"""
         area = read_preset_area(self.ctx, self.last_screenshot, '手柄-电量')
-        if area is None:
-            return None
+        if area is None or not area[1]:
+            return 'wait', None
         values: list[tuple[int, int]] = []
+        unknown = False
         for text, matches in area[1].items():
             match = re.fullmatch(r'\s*(\d{1,4})\s*/\s*(\d{1,3})\s*', text)
-            if match is not None and len(matches) == 1:
+            if match is not None:
+                if len(matches) != 1:
+                    return 'invalid', None
                 values.append((int(match[1]), int(match[2])))
             elif (text == '三' and len(matches) == 1 and matches.max is not None
                   and matches.max.rect.x1 >= 105):
-                # 已观察的右侧 Start 图标被 OCR 读成“三”，不能作为电量。
                 continue
             else:
-                return None
-        return values[0] if len(values) == 1 else None
+                unknown = True
+        if len(values) > 1:
+            return 'invalid', None
+        if unknown or not values:
+            return 'wait', None
+        return 'ok', values[0]
+
+    def _charge(self) -> tuple[int, int] | None:
+        if self.plan.level == '默认等级':
+            return super()._charge()
+        state, charge = self._charge_state()
+        return charge if state == 'ok' else None
 
     @operation_node(name='检查手柄计划', is_start_node=True)
     def check_plan(self) -> OperationRoundResult:
@@ -217,7 +258,7 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
     @node_from(from_name='加载既有自动战斗')
     @operation_node(name='配置挑战卡片', node_max_retry_times=8, timeout_seconds=20)
     def prepare_cards(self) -> OperationRoundResult:
-        """巡防不编辑模拟室卡片，必须重新确认目标详情。"""
+        """巡防详情须确认目标与等级；缺少证据只有限等待。"""
         if self._plan_changed():
             self._clear_level_proof()
             return self.round_fail('本场计划已变化，停止区域巡防')
@@ -227,116 +268,117 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
                 self.ctx.controller.btn_tap('east')
                 self._return_to_preset_sent = True
             return self.round_retry('返回详情重新确认驱动盘副本', wait=1)
-        if self._found('手柄-挑战等级') and self._found('手柄-下一步'):
-            if self.plan.level != '默认等级' and not self._fresh_frame():
-                self._clear_level_proof()
-                return self.round_fail('区域巡防详情截图过期或无效，未进入编队')
-            if not self._preset_selected():
-                self._clear_level_proof()
-                self.save_screenshot(prefix='macos_patrol_wrong_target')
-                return self.round_fail(f'当前详情并非计划副本{self.plan.mission_type_name}')
-            self._level_confirmed = self._level_matches()
-            if not self._level_confirmed:
-                return self.round_fail('未确认要求的区域巡防Lv.60，未进入编队或出战')
-            if self.plan.level != '默认等级':
-                digest = self._frame_digest()
-                if not self._fresh_frame() or digest is None:
-                    self._clear_level_proof()
-                    return self.round_fail('区域巡防详情截图无效或已过期，未进入编队')
-                self._seen_frame_digests.add(digest)
-            self._detail_frame_time = self.last_screenshot_time
-            return self.round_success('驱动盘副本已确认')
-        return self.round_retry('等待区域巡防详情', wait=1)
+        if self.plan.level == '默认等级':
+            if self._found('手柄-挑战等级') and self._found('手柄-下一步'):
+                if not self._preset_selected():
+                    self.save_screenshot(prefix='macos_patrol_wrong_target')
+                    return self.round_fail(f'当前详情并非计划副本{self.plan.mission_type_name}')
+                return self.round_success('驱动盘副本已确认')
+            return self.round_retry('等待区域巡防详情', wait=1)
+        if not self._new_frame():
+            return self.round_retry('等待新鲜巡防详情帧', wait=1)
+        if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')):
+            return self.round_retry('等待区域巡防详情', wait=1)
+        target, level = self._target_state(), self._level_state()
+        if 'invalid' in (target, level):
+            self._clear_level_proof()
+            return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+        if target != 'ok' or level != 'ok' or not self._fresh_frame():
+            return self.round_retry('等待明确的巡防目标与Lv.60', wait=1)
+        self._level_confirmed = True
+        self._detail_frame_time = self.last_screenshot_time
+        return self.round_success('驱动盘副本已确认')
 
     @node_from(from_name='配置挑战卡片')
     @operation_node(name='准备当前编队', node_max_retry_times=10, timeout_seconds=180)
     def prepare_deployment(self) -> OperationRoundResult:
-        """显式等级须用本场新鲜详情确认，编队只接续有限时间的证明。"""
+        """下一步前重读详情；发送后等待过渡与新编队页，不重复输入。"""
         if self._plan_changed():
             self._clear_level_proof()
             return self.round_fail('本场计划已变化，停止区域巡防')
         if self.plan.level == '默认等级':
             return super().prepare_deployment()
-        if not self._fresh_frame():
-            self._clear_level_proof()
-            return self.round_fail('区域巡防截图过期或无效，未允许出战')
-        digest = self._frame_digest()
-        if digest is None or digest in self._seen_frame_digests:
-            self._clear_level_proof()
-            return self.round_fail('区域巡防截图无效或重复，未允许出战')
-        self._seen_frame_digests.add(digest)
-        if self._deployment_visible():
-            if not self._proof_valid() or self.last_screenshot_time <= self._next_frame_time:
-                self._clear_level_proof()
-                return self.round_fail('本场Lv.60详情证明缺失或过期，未允许出战')
+        if not self._new_frame():
+            return self.round_retry('等待新的有效采集帧', wait=1)
+        if self._next_sent:
+            if not self._proof_valid() or self.last_screenshot_time <= self._next_sent_at:
+                return self.round_retry('等待本场有效的编队证明', wait=1)
+            if not self._deployment_visible():
+                if self._found('手柄-挑战等级') and self._found('手柄-下一步'):
+                    if 'invalid' in (self._target_state(), self._level_state()):
+                        self._clear_level_proof()
+                        return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+                return self.round_retry('等待下一步后的编队页面', wait=1)
+            state, charge = self._charge_state()
+            if state == 'invalid':
+                return self.round_fail('编队电量读数有歧义')
+            if state != 'ok' or charge is None:
+                return self.round_retry('等待编队电量读数', wait=1)
+            if charge[1] != self.expected_charge:
+                return self.round_fail(f'当前编队消耗 {charge[1]} 电量，与目标 {self.expected_charge} 不一致')
+            if charge[0] < charge[1]:
+                return self.round_fail(self.STATUS_CHARGE_NOT_ENOUGH)
             result = super().prepare_deployment()
             if result.is_success:
                 if not self._fresh_frame() or not self._proof_valid():
-                    self._clear_level_proof()
-                    return self.round_fail('编队核验期间截图或等级证明过期，未允许出战')
+                    return self.round_retry('等待新鲜的编队证明', wait=1)
                 self._ready_frame_time = self.last_screenshot_time
             return result
         if not self._level_confirmed or self.last_screenshot_time <= self._detail_frame_time:
+            return self.round_retry('等待本场新的Lv.60详情帧', wait=1)
+        if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')):
+            return self.round_retry('等待区域巡防详情', wait=1)
+        target, level = self._target_state(), self._level_state()
+        if 'invalid' in (target, level):
             self._clear_level_proof()
-            return self.round_fail('未取得本场新的Lv.60详情帧，未进入编队')
-        if self._next_sent and not self._proof_valid():
-            self._clear_level_proof()
-            return self.round_fail('本场Lv.60详情证明缺失或过期，未进入编队')
-        if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')
-                and self._preset_selected() and self._level_matches()):
-            self._clear_level_proof()
-            return self.round_fail('区域巡防目标或Lv.60未知、已变化，未进入编队')
-        charge = self._charge()
-        if charge is None:
-            return self.round_retry('未能确认实际电量消耗', wait=1)
-        current, required = charge
-        if not self.bind_prepared_charge(required):
-            self._clear_level_proof()
-            return self.round_fail(f'当前预设消耗 {required} 电量，与目标 {self.expected_charge} 不一致')
-        if current < required:
+            return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+        state, charge = self._charge_state()
+        if state == 'invalid':
+            return self.round_fail('区域巡防电量读数有歧义')
+        if target != 'ok' or level != 'ok' or state != 'ok' or charge is None:
+            return self.round_retry('等待巡防目标、等级和电量读数', wait=1)
+        if charge[1] != self.expected_charge:
+            return self.round_fail(f'当前预设消耗 {charge[1]} 电量，与目标 {self.expected_charge} 不一致')
+        if charge[0] < charge[1]:
             return self.round_fail(self.STATUS_CHARGE_NOT_ENOUGH)
-        if not self._fresh_frame() or (self._next_sent and not self._proof_valid()):
-            self._clear_level_proof()
-            return self.round_fail('区域巡防详情截图或等级证明过期，未进入编队')
-        if not self._next_sent:
-            self.ctx.controller.btn_tap('start')
-            self._next_sent = True
-            self._next_frame_time = self.last_screenshot_time
-            self._proof_started = time.monotonic()
+        if not self._fresh_frame():
+            return self.round_retry('等待新鲜的巡防详情', wait=1)
+        self.ctx.controller.btn_tap('start')
+        self._next_sent = True
+        self._next_sent_at = time.time()
+        self._next_frame_time = self.last_screenshot_time
+        self._proof_started = time.monotonic()
         return self.round_retry('等待出战准备页', wait=1)
 
     @node_from(from_name='准备当前编队', status=GamepadCombatSimulation.STATUS_DEPLOYMENT_READY)
     @operation_node(name='手柄出战', node_max_retry_times=10, timeout_seconds=15)
     def deploy(self) -> OperationRoundResult:
-        """出战前保留本场详情证明，并重新核验编队画面和实际费用。"""
+        """仅在本场证明及新鲜编队页均有效时出战一次。"""
         if self._plan_changed():
             self._clear_level_proof()
             return self.round_fail('本场计划已变化，停止区域巡防')
         if self.plan.level == '默认等级':
             return super().deploy()
-        digest = self._frame_digest()
-        if (not self._fresh_frame() or not self._proof_valid() or not self._ready_frame_time
-                or self.last_screenshot_time <= self._ready_frame_time or digest is None
-                or digest in self._seen_frame_digests):
-            self._clear_level_proof()
-            return self.round_fail('本场Lv.60证明或出战帧缺失、过期，未允许出战')
-        self._seen_frame_digests.add(digest)
+        if self._deploy_sent:
+            if self._proof_valid() and self._ready_frame_time:
+                return self.round_success()
+            return self.round_retry('等待本场出战证明', wait=1)
+        if (not self._new_frame() or not self._proof_valid() or not self._ready_frame_time
+                or self.last_screenshot_time <= max(self._ready_frame_time, self._next_sent_at)):
+            return self.round_retry('等待本场新鲜编队证明', wait=1)
         if not self._deployment_visible():
             return self.round_retry('等待出战准备页', wait=1)
-        if self._deploy_sent:
-            return super().deploy()
-        charge = self._charge()
-        if charge is None:
-            return self.round_retry('未能确认出战电量', wait=1)
-        current, required = charge
-        if not self.bind_prepared_charge(required):
-            self._clear_level_proof()
-            return self.round_fail(f'出战消耗 {required} 电量，与目标 {self.expected_charge} 不一致')
-        if current < required:
+        state, charge = self._charge_state()
+        if state == 'invalid':
+            return self.round_fail('出战电量读数有歧义')
+        if state != 'ok' or charge is None:
+            return self.round_retry('等待出战电量读数', wait=1)
+        if charge[1] != self.expected_charge:
+            return self.round_fail(f'出战消耗 {charge[1]} 电量，与目标 {self.expected_charge} 不一致')
+        if charge[0] < charge[1]:
             return self.round_fail(self.STATUS_CHARGE_NOT_ENOUGH)
         if not self._fresh_frame() or not self._proof_valid():
-            self._clear_level_proof()
-            return self.round_fail('出战核验期间截图或等级证明过期，未允许出战')
+            return self.round_retry('等待新鲜的出战证明', wait=1)
         self.ctx.controller.btn_tap('start')
         self._deploy_sent = True
         return self.round_success(wait=1)
