@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -85,6 +85,9 @@ class GamepadChargeBackToWorld(GamepadOperation):
 class GamepadAreaPatrol(GamepadCombatSimulation):
     """每场核对指定驱动盘副本及六十电量，再复用既有战斗闭环。"""
 
+    STATUS_WRONG_TARGET: ClassVar[str] = '区域巡防副本标题或选中卡片明确不符'
+    STATUS_WRONG_LEVEL: ClassVar[str] = '区域巡防挑战等级明确不是计划的Lv.60'
+
     def __init__(self, ctx: ZContext, plan: ChargePlanItem, prepare_only: bool = False, config: ChargePlanConfig | None = None) -> None:
         super().__init__(ctx, plan, prepare_only=prepare_only, config=config)
         self.op_name = '手柄区域巡防单次挑战'
@@ -149,22 +152,21 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         super().handle_resume()
 
     def _level_state(self) -> str:
-        """未读到等待；唯一明确错误或多候选立即拒绝。"""
+        """只用唯一的完整 Lv.60 作证明；短暂多框/杂字等待新帧。"""
         if self.plan.level != '等级Lv.60':
             return 'invalid'
         area = read_preset_area(self.ctx, self.last_screenshot, '手柄-挑战等级数值', '区域巡防')
         if area is None or not area[1]:
             return 'wait'
-        if len(area[1]) != 1:
-            return 'invalid'
-        text, matches = next(iter(area[1].items()))
-        if len(matches) != 1:
-            return 'invalid'
-        value = text.replace(' ', '').strip()
-        match = re.fullmatch(r'(?:等级)?[Ll][Vv]\.(\d{1,3})', value)
-        if match is None:
-            return 'wait'
-        return 'ok' if match[1] == '60' else 'invalid'
+        readable = False
+        for text, matches in area[1].items():
+            value = text.replace(' ', '').strip()
+            match = re.fullmatch(r'(?:等级)?[Ll][Vv]\.(\d{1,3})', value)
+            if match is not None:
+                if match[1] != '60':
+                    return 'invalid'
+                readable = len(matches) == 1
+        return 'ok' if readable and len(area[1]) == 1 else 'wait'
 
     def _level_matches(self) -> bool:
         """仅用于只读识别；默认等级保持既有行为。"""
@@ -197,22 +199,30 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         area = read_preset_area(self.ctx, self.last_screenshot, '手柄-副本标题', '区域巡防')
         if area is None or not area[1]:
             return 'wait'
-        if len(area[1]) != 1:
-            return 'invalid'
-        text, matches = next(iter(area[1].items()))
-        if len(matches) != 1:
-            return 'invalid'
-        name = text.replace(' ', '')
         names = charge_mission_names('区域巡防')
-        if name != self.plan.mission_type_name:
-            return 'invalid' if name in names else 'wait'
+        target = self.plan.mission_type_name
+        titles = {text.replace(' ', '') for text in area[1]}
+        if any(name != target and name in names for name in titles):
+            return 'invalid'
+        # 标题仍须有且仅有一个识别框。噪声不算通过，只复读下一张新帧。
+        if len(area[1]) != 1 or target not in titles or len(next(iter(area[1].values()))) != 1:
+            return 'wait'
         selected, _ = read_focused_choice(
             self.ctx, self.last_screenshot, '手柄-副本列表', names, '区域巡防',
             border_gap=35, allow_corner_gap=True,
         )
         if selected is None:
             return 'wait'
-        return 'ok' if selected == self.plan.mission_type_name else 'invalid'
+        return 'ok' if selected == target else 'invalid'
+
+    def _detail_mismatch(self, target: str, level: str) -> OperationRoundResult | None:
+        """明确读到其他目标或等级时立即停，并标明是哪一项。"""
+        if 'invalid' not in (target, level):
+            return None
+        self._clear_level_proof()
+        if target == 'invalid':
+            return self.round_fail(self.STATUS_WRONG_TARGET)
+        return self.round_fail(self.STATUS_WRONG_LEVEL)
 
     def _charge_state(self) -> tuple[str, tuple[int, int] | None]:
         """只接受唯一完整费用；可识别的冲突立即拒绝，缺读数等待。"""
@@ -280,9 +290,9 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')):
             return self.round_retry('等待区域巡防详情', wait=1)
         target, level = self._target_state(), self._level_state()
-        if 'invalid' in (target, level):
-            self._clear_level_proof()
-            return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+        mismatch = self._detail_mismatch(target, level)
+        if mismatch is not None:
+            return mismatch
         if target != 'ok' or level != 'ok' or not self._fresh_frame():
             return self.round_retry('等待明确的巡防目标与Lv.60', wait=1)
         self._level_confirmed = True
@@ -305,9 +315,9 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
                 return self.round_retry('等待本场有效的编队证明', wait=1)
             if not self._deployment_visible():
                 if self._found('手柄-挑战等级') and self._found('手柄-下一步'):
-                    if 'invalid' in (self._target_state(), self._level_state()):
-                        self._clear_level_proof()
-                        return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+                    mismatch = self._detail_mismatch(self._target_state(), self._level_state())
+                    if mismatch is not None:
+                        return mismatch
                 return self.round_retry('等待下一步后的编队页面', wait=1)
             state, charge = self._charge_state()
             if state == 'invalid':
@@ -329,9 +339,9 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')):
             return self.round_retry('等待区域巡防详情', wait=1)
         target, level = self._target_state(), self._level_state()
-        if 'invalid' in (target, level):
-            self._clear_level_proof()
-            return self.round_fail('区域巡防目标或等级明确错误或有歧义')
+        mismatch = self._detail_mismatch(target, level)
+        if mismatch is not None:
+            return mismatch
         state, charge = self._charge_state()
         if state == 'invalid':
             return self.round_fail('区域巡防电量读数有歧义')
