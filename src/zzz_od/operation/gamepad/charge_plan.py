@@ -325,7 +325,16 @@ class GamepadChargePlan(GamepadOperation):
         if not (self._found('手柄-挑战等级') and self._found('手柄-下一步')):
             return self.round_retry('等待已建档的模拟室预设页', wait=1)
         self._simulation.last_screenshot = self.last_screenshot
-        if not self._simulation._preset_selected():
+        if self._simulation.plan.level == '等级Lv.60' and isinstance(self._simulation, GamepadAreaPatrol):
+            self._simulation.last_screenshot_time = self.last_screenshot_time
+            if not self._simulation._new_frame():
+                return self.round_retry('等待新鲜巡防预检帧', wait=1)
+            target = self._simulation._target_state()
+            if target == 'invalid':
+                return self.round_fail(GamepadAreaPatrol.STATUS_WRONG_TARGET)
+            if target != 'ok':
+                return self.round_retry('等待唯一的巡防副本标题和选中卡片', wait=1)
+        elif not self._simulation._preset_selected():
             return self.round_fail('当前材料专项与计划不一致，未允许出战')
         charge = self._simulation.read_charge()
         if charge is None:
