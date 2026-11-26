@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, ClassVar
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.utils import debug_utils
+from one_dragon.utils.log_utils import log
 from zzz_od.application.notorious_hunt.notorious_hunt_config import MACOS_HIGHEST_LEVEL
 from zzz_od.operation.compendium.notorious_hunt_move import NotoriousHuntMove
 from zzz_od.operation.gamepad.battle_guide import GamepadBattleGuide
@@ -563,6 +564,7 @@ class GamepadHuntBattle(GamepadOperation):
         self.original: NotoriousHunt = NotoriousHunt(ctx, plan, use_charge_power=False)
         self._scope: bool = False
         self._active: bool = False
+        self._capture_gap_started: float | None = None
 
     def execute(self) -> OperationResult:
         """退出任何结果都释放本场战斗输入。"""
@@ -574,6 +576,7 @@ class GamepadHuntBattle(GamepadOperation):
                 self.ctx.controller.end_battle_input_scope()
             self._scope = False
             self._active = False
+            self._capture_gap_started = None
 
     @operation_node(name='启动原自动战斗', is_start_node=True, node_max_retry_times=5)
     def start(self) -> OperationRoundResult:
@@ -597,18 +600,33 @@ class GamepadHuntBattle(GamepadOperation):
     def battle(self) -> OperationRoundResult:
         """原恶名狩猎处理战斗状态；Mac 只在 HUD 消失时阻止残留按键。"""
         battle = self.ctx.auto_battle_context
-        if self.ctx.controller.battle_input_blocked:
+        if self.last_screenshot is None:
             if self._active:
                 battle.stop_auto_battle()
                 self._active = False
-            if self.ctx.controller.refresh_battle_input_scope():
-                battle.resume_auto_battle()
-                self._active = True
-        if self.ctx.controller.battle_input_blocked:
+            if self._capture_gap_started is None:
+                self._capture_gap_started = time.monotonic()
+                log.warning('恶名狩猎采集未返回有效帧，已停战斗输入，等待新画面')
+            if time.monotonic() - self._capture_gap_started >= 5:
+                return self.round_fail('恶名狩猎采集 5 秒未恢复，已停止战斗输入')
+            return self.round_wait(wait=0.3)
+
+        if self._capture_gap_started is not None or self.ctx.controller.battle_input_blocked:
+            if self._active:
+                battle.stop_auto_battle()
+                self._active = False
             outcome = read_hunt_result(self)
             if outcome is not None:
                 self.save_screenshot(prefix='macos_hunt_battle_result')
                 return self.round_success('恶名狩猎胜利' if outcome else '恶名狩猎失败')
+            if self.ctx.controller.refresh_battle_input_scope():
+                battle.resume_auto_battle()
+                self._active = True
+                if self._capture_gap_started is not None:
+                    log.info('恶名狩猎已复核新鲜战斗画面，恢复战斗')
+                    self._capture_gap_started = None
+            elif self._capture_gap_started is not None and time.monotonic() - self._capture_gap_started >= 5:
+                return self.round_fail('恶名狩猎采集恢复后 5 秒内未确认战斗或结算画面')
             return self.round_wait(wait=0.3)
         self.original.last_screenshot = self.last_screenshot
         self.original.last_screenshot_time = self.last_screenshot_time

@@ -338,6 +338,7 @@ class GamepadIntelBattle(GamepadOperation):
         self._scope: bool = False
         self._active: bool = False
         self._blocked_since: float | None = None
+        self._capture_gap: bool = False
 
     def execute(self) -> OperationResult:
         """异常、停止和正常结束都先停策略，再结束输入限制。"""
@@ -356,7 +357,7 @@ class GamepadIntelBattle(GamepadOperation):
         from zzz_od.controller.macos_battle_input_guard import MacBattleHudGuard
 
         battle = self.ctx.auto_battle_context
-        if not battle.is_normal_attack_btn_available(self.last_screenshot):
+        if self.last_screenshot is None or not battle.is_normal_attack_btn_available(self.last_screenshot):
             return self.round_retry('等待代行战斗 HUD', wait=0.5)
         self.ctx.controller.begin_battle_input_scope(MacBattleHudGuard(battle))
         self._scope = True
@@ -369,22 +370,27 @@ class GamepadIntelBattle(GamepadOperation):
     def battle(self) -> OperationRoundResult:
         """HUD 消失先停策略，按通关目标区分胜负。"""
         battle = self.ctx.auto_battle_context
-        if self.ctx.controller.battle_input_blocked:
+        if self.last_screenshot is None:
+            self._capture_gap = True
+        if self._capture_gap or self.ctx.controller.battle_input_blocked:
             self._blocked_since = self._blocked_since or time.monotonic()
             if self._active:
                 battle.stop_auto_battle()
                 self._active = False
-            won = read_intel_result(self)
-            if won is not None:
-                self.save_screenshot(prefix='macos_intel_battle_result')
-                return self.round_success('代行战斗结束', data={'won': won})
-            if self.ctx.controller.refresh_battle_input_scope():
-                battle.resume_auto_battle()
-                self._active = True
-                self._blocked_since = None
-            elif time.monotonic() - self._blocked_since > 20:
+            if self.last_screenshot is not None:
+                won = read_intel_result(self)
+                if won is not None:
+                    self.save_screenshot(prefix='macos_intel_battle_result')
+                    return self.round_success('代行战斗结束', data={'won': won})
+                if self.ctx.controller.refresh_battle_input_scope():
+                    battle.resume_auto_battle()
+                    self._active = True
+                    self._blocked_since = None
+                    self._capture_gap = False
+                    return self.round_wait(wait=0.3)
+            if time.monotonic() - self._blocked_since > 20:
                 self.save_screenshot(prefix='macos_intel_unknown_battle_result')
-                return self.round_fail('代行战斗 HUD 消失，未识别通关结果')
+                return self.round_fail('未确认代行战斗画面或通关结果，已停止输入')
             return self.round_wait(wait=0.3)
         battle.check_battle_state(self.last_screenshot, self.last_screenshot_time, check_battle_end_normal_result=True)
         return self.round_wait(wait=self.ctx.battle_assistant_config.screenshot_interval)
