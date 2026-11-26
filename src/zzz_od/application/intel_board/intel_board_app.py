@@ -1,3 +1,4 @@
+import re
 import sys
 from enum import StrEnum
 from typing import ClassVar
@@ -34,6 +35,7 @@ class IntelBoardApp(GamepadMenuDelayMixin, ZApplication):
 
     """情报板:刷新/筛选动态情报板的代行委托(恶名狩猎/专业挑战室),代行出战清理板面。代行他人委托不耗自身电量(获贡献点;这些玩法自行挑战消耗电量)。"""
     realtime_nodes: ClassVar[frozenset[str]] = frozenset({'战斗中'})
+    STATUS_UNCONFIRMED_PROGRESS: ClassVar[str] = '未确认情报板周期进度，已停止接取委托'
 
     def __init__(self, ctx: ZContext):
         ZApplication.__init__(
@@ -125,6 +127,8 @@ class IntelBoardApp(GamepadMenuDelayMixin, ZApplication):
     def refresh_commission(self) -> OperationRoundResult:
         self.scroll_times = 0
         if sys.platform == 'darwin':
+            if self.previous_node.status == self.STATUS_UNCONFIRMED_PROGRESS:
+                return self.round_fail(self.STATUS_UNCONFIRMED_PROGRESS)
             from zzz_od.operation.gamepad.intel_board import GamepadIntelRefresh
 
             return self.round_by_op_result(GamepadIntelRefresh(self.ctx).execute()) if self.has_filtered else self.round_success('未筛选')
@@ -477,7 +481,7 @@ class IntelBoardApp(GamepadMenuDelayMixin, ZApplication):
 
     @node_from(from_name='检查回到委托列表')
     @node_from(from_name='点击情报板')
-    @operation_node(name='检查进度')
+    @operation_node(name='检查进度', node_max_retry_times=4)
     def check_progress(self) -> OperationRoundResult:
         # 刷经验模式：先检查已有经验是否够了
         if self.config.exp_grind_mode and self.run_record.exp_complete:
@@ -486,6 +490,8 @@ class IntelBoardApp(GamepadMenuDelayMixin, ZApplication):
         # OCR 读取进度代币值
         rect = self.ctx.screen_loader.get_area('情报板', '进度文本').rect
         screen = self.last_screenshot
+        if sys.platform == 'darwin' and screen is None:
+            return self.round_retry(self.STATUS_UNCONFIRMED_PROGRESS, wait=0.6)
         part = cv2_utils.crop_image_only(screen, rect)
         ocr_result = self.ctx.ocr.run_ocr_single_line(part)
 
@@ -493,8 +499,14 @@ class IntelBoardApp(GamepadMenuDelayMixin, ZApplication):
         try:
             normalized = ocr_result.replace('／', '/')
             clean_text = ''.join([c for c in normalized if c.isdigit() or c == '/'])
+            if sys.platform == 'darwin' and re.fullmatch(r'([0-9]{1,3}|1000)/1000', clean_text) is None:
+                if self.node_retry_times >= 3:
+                    self.save_screenshot(prefix='macos_intel_progress_unconfirmed')
+                return self.round_retry(self.STATUS_UNCONFIRMED_PROGRESS, wait=0.6)
             if '/' in clean_text:
                 current = int(clean_text.split('/')[0])
+                if sys.platform == 'darwin':
+                    self.save_screenshot(prefix=f'macos_intel_progress_{current}')
 
                 if not self.config.exp_grind_mode:
                     # 普通模式：代币值满即完成
