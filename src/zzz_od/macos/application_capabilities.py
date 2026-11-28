@@ -46,12 +46,14 @@ MACOS_SUPPORTED_APP_IDS: frozenset[str] = frozenset({
     'suibian_temple',
     'predefined_team_checker',
     'intel_board',
+    'notify',
 })
 
 
 def get_macos_app_limits(app_id: str) -> str:
     """让每个任务显示自身范围，避免商店按钮误显示战斗限制。"""
     return {
+        'notify': 'Mac 使用当前账户的运行记录和通知渠道发送结果汇总，列出成功、失败及可用的体力估算。',
         'intel_board': 'Mac 支持恶名狩猎和专业挑战室的零电量战斗代行，不接剧情；第一队叶瞬光完整周期1000及返回已验，其他队伍沿原成员核对与战斗策略',
         'auto_battle': 'Mac 原生手柄独立助手：沿原策略等待战斗，支持暂停、恢复、停止及释放；从大世界、手柄战斗或战况菜单启动',
         'dodge_assistant': 'Mac 原生手柄闪避助手使用画面闪光与游戏声音识别，沿原策略等待战斗，支持暂停、恢复、停止及释放；不在菜单继续输出',

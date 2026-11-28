@@ -1,3 +1,4 @@
+import sys
 from datetime import datetime, timedelta
 
 from one_dragon.base.operation.application_run_record import AppRunRecord
@@ -13,13 +14,13 @@ class NotifyApp(ZApplication):
 
     """通知服务:应用运行结果通知发送(非玩法,无消耗)。"""
 
-    def __init__(self, ctx: ZContext):
+    def __init__(self, ctx: ZContext) -> None:
         ZApplication.__init__(
             self,
             ctx,
             notify_const.APP_ID,
             op_name=notify_const.APP_NAME,
-            need_check_game_win=True,
+            need_check_game_win=sys.platform != 'darwin',
         )
 
     @operation_node(name='发送通知', is_start_node=True)
@@ -32,11 +33,13 @@ class NotifyApp(ZApplication):
 
         message = self.format_message()
 
-        self.ctx.push_service.push(
+        sent, reason = self.ctx.push_service.push(
             title=self.ctx.notify_config.title,
             content=message,
             image=self.last_screenshot
         )
+        if sys.platform == 'darwin' and not sent:
+            return self.round_fail(reason or '结果通知未发送')
 
         if self.exist_failure:
             return self.round_fail(wait=5)
@@ -51,6 +54,8 @@ class NotifyApp(ZApplication):
 
         group_config = self.ctx.app_group_manager.get_one_dragon_group_config(instance_idx=self.ctx.current_instance_idx)
         for app_config in group_config.app_list:
+            if sys.platform == 'darwin' and (not app_config.enabled or app_config.app_id == notify_const.APP_ID):
+                continue
             run_record: AppRunRecord = self.ctx.run_context.get_run_record(
                 app_id=app_config.app_id,
                 instance_idx=self.ctx.current_instance_idx
@@ -85,7 +90,7 @@ class NotifyApp(ZApplication):
         if has_success:
             parts.append(f"✅ 成功指令：{', '.join(success)}")
         elif not has_failure:
-            parts.append("全部失败❌")
+            parts.append("近期没有已结束的启用任务" if sys.platform == 'darwin' else "全部失败❌")
 
         return "\n".join(parts)
 

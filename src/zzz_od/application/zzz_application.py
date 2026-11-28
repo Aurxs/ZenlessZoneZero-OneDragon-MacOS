@@ -52,7 +52,7 @@ class ZApplication(Application):
         unavailable_reason = get_macos_app_unavailable_reason(self.app_id)
         if unavailable_reason is not None:
             return self.op_fail(unavailable_reason)
-        if sys.platform == 'darwin':
+        if sys.platform == 'darwin' and self.need_check_game_win:
             result = self.ctx.macos_session_preparation.prepare()
             if not result.success:
                 return result
