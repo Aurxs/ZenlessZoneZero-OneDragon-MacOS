@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import cv2
@@ -27,10 +28,20 @@ if TYPE_CHECKING:
     from zzz_od.context.zzz_context import ZContext
 
 
+@dataclass(frozen=True)
+class LostVoidCycleProgress:
+    """最终奖励格核实后的两项周目标。"""
+
+    eval_point_complete: bool
+    period_reward_complete: bool
+
+
 class GamepadLostVoidBattleResult(GamepadOperation):
     """通过完成关卡和底栏按键确认实际胜利，X失败页不累计通关。"""
 
-    def __init__(self, ctx: ZContext, investigation_completed: bool = False) -> None:
+    def __init__(
+        self, ctx: ZContext, investigation_completed: bool = False, read_cycle_rewards: bool = False,
+    ) -> None:
         super().__init__(ctx, op_name='手柄迷失之地挑战结果', timeout_seconds=25)
         self.navigation: GamepadTransportByCompendium = GamepadTransportByCompendium(
             ctx, '作战', '周期征讨'
@@ -39,6 +50,20 @@ class GamepadLostVoidBattleResult(GamepadOperation):
         self._status: str | None = None
         self._next_region: str | None = None
         self.investigation_completed: bool = investigation_completed
+        self.read_cycle_rewards: bool = read_cycle_rewards
+        self._cycle_sample: tuple[tuple[str, ...], LostVoidCycleProgress] | None = None
+        self._cycle_checks: int = 0
+        self._cycle_progress: LostVoidCycleProgress | None = None
+
+    def handle_init(self) -> None:
+        """重新执行时只采用本次挑战的结算画面。"""
+        super().handle_init()
+        self._sent = False
+        self._status = None
+        self._next_region = None
+        self._cycle_sample = None
+        self._cycle_checks = 0
+        self._cycle_progress = None
 
     @operation_node(
         name='确认胜利与结果去向', is_start_node=True, node_max_retry_times=15
@@ -52,7 +77,12 @@ class GamepadLostVoidBattleResult(GamepadOperation):
         if self._sent:
             if not title:
                 self.save_screenshot(prefix='macos_lost_void_result_confirmed')
-                return self.round_success(self._status, data=self._next_region)
+                data = (
+                    self._cycle_progress
+                    if self.read_cycle_rewards and self._status == LostVoidRunLevel.STATUS_COMPLETE
+                    else self._next_region
+                )
+                return self.round_success(self._status, data=data)
             return self.round_retry('等待已确认的挑战结果关闭', wait=1)
         if not title:
             return self.round_retry('等待挑战结果标题', wait=1)
@@ -106,6 +136,16 @@ class GamepadLostVoidBattleResult(GamepadOperation):
                 )
                 if not final_grade or not values or max(values) <= 0:
                     return self._wait_victory_evidence()
+            if self.read_cycle_rewards:
+                sample = self._read_cycle_rewards()
+                self._cycle_checks += 1
+                if sample is not None and sample == self._cycle_sample:
+                    self._cycle_progress = sample[1]
+                elif self._cycle_checks < 5 and self.node_retry_times < 12:
+                    self._cycle_sample = sample
+                    return self.round_retry('等待完整的周奖励格稳定', wait=1)
+                else:
+                    self.save_screenshot(prefix='macos_lost_void_cycle_rewards_unconfirmed')
             key = 'east'
             self._status = LostVoidRunLevel.STATUS_COMPLETE
             self._next_region = LostVoidRegionType.ENTRY.value.value
@@ -115,6 +155,63 @@ class GamepadLostVoidBattleResult(GamepadOperation):
         self.ctx.controller.btn_tap(key)
         self._sent = True
         return self.round_retry('等待挑战结果确认生效', wait=1)
+
+    def _read_cycle_rewards(self) -> tuple[tuple[str, ...], LostVoidCycleProgress] | None:
+        """每个槽位读齐后才按原零号业绩、丁尼图标判定周进度。"""
+        screen_name = '迷失之地-挑战结果'
+        self.navigation.last_screenshot = self.last_screenshot
+        area = self.navigation._read_area(screen_name, '奖励-零号业绩')
+        if area is None:
+            return None
+        image, words = area
+        captions: list[set[str]] = [set() for _ in range(8)]
+        width = image.shape[1]
+        for text, matches in words.items():
+            label = text.strip().upper()
+            if label != 'EMPTY' and re.fullmatch(r'[1-9][0-9]*', label) is None:
+                continue
+            for match in matches:
+                x, y = match.center.x, match.center.y
+                for row, center_y in enumerate((157, 315)):
+                    if 0 <= x < width and abs(y - center_y) <= 25:
+                        captions[row * 4 + x * 4 // width].add(label)
+        if any(len(labels) != 1 for labels in captions):
+            return None
+        complete = tuple(next(iter(labels)) for labels in captions)
+        occupied = sum(label != 'EMPTY' for label in complete)
+        if occupied == 0 or any(label != 'EMPTY' for label in complete[occupied:]):
+            return None
+
+        merit = self._cycle_reward_present(image, occupied, '奖励-零号业绩')
+        money = self._cycle_reward_present(image, occupied, '奖励-丁尼')
+        if merit is None or money is None:
+            return None
+        return complete, LostVoidCycleProgress(
+            eval_point_complete=not merit,
+            period_reward_complete=not merit and not money,
+        )
+
+    def _cycle_reward_present(self, image: MatLike, occupied: int, area_name: str) -> bool | None:
+        """模板须命中实际有数量的槽位，接近阈值的匹配不用于判满。"""
+        area = self.ctx.screen_loader.get_area('迷失之地-挑战结果', area_name)
+        if area is None:
+            return None
+        template = self.ctx.tm.template_loader.get_template(area.template_sub_dir, area.template_id)
+        if template is None or template.raw is None:
+            return None
+        score_threshold = area.template_match_threshold
+        match = self.ctx.tm.match_template(
+            image, area.template_sub_dir, area.template_id, threshold=score_threshold - 0.07,
+        ).max
+        if match is None:
+            return False
+        if match.confidence < score_threshold:
+            return None
+        x, y = match.center.x, match.center.y
+        for row, center_y in enumerate((80, 237)):
+            if abs(y - center_y) <= 45:
+                return True if row * 4 + x * 4 // image.shape[1] < occupied else None
+        return None
 
     def _has_result_action(
         self, actions: tuple[MatLike, dict[str, MatchResultList]], icon: str, label: str,

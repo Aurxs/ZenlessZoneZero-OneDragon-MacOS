@@ -447,6 +447,7 @@ class GamepadLostVoidRunLevel(GamepadMenuDelayMixin, LostVoidRunLevel):
 
             return self.round_by_op_result(GamepadLostVoidBattleResult(
                 self.ctx, investigation_completed=self._boss_completion_seen,
+                read_cycle_rewards=self.run_record is not None and self.run_record.config.is_cycle_reward_mode,
             ).execute())
         route=self.check_and_update_current_screen(self.last_screenshot,screen_name_list=['迷失之地-路径迭换'])
         if route is not None:

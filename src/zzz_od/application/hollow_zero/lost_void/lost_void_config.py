@@ -51,6 +51,11 @@ class LostVoidConfig(ApplicationConfig):
         return self.extra_task == LostVoidTaskEnum.BOUNTY_COMMISSION.value.value
 
     @property
+    def is_cycle_reward_mode(self) -> bool:
+        """选择了需要从最终结算判断是否刷满的周目标。"""
+        return self.extra_task in (LostVoidTaskEnum.EVAL_POINT.value.value, LostVoidTaskEnum.PERIOD_REWARD.value.value)
+
+    @property
     def mission_name(self) -> str:
         return self.get('mission_name', '战线肃清')
 

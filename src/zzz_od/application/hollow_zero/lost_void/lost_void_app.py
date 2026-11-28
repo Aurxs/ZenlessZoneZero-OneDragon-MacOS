@@ -1,7 +1,7 @@
 import re
 import sys
 import time
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import cv2
 
@@ -37,6 +37,9 @@ from zzz_od.operation.choose_predefined_team import ChoosePredefinedTeam
 from zzz_od.operation.compendium.tp_by_compendium import TransportByCompendium
 from zzz_od.operation.deploy import Deploy
 
+if TYPE_CHECKING:
+    from zzz_od.operation.gamepad.lost_void_result import LostVoidCycleProgress
+
 
 class LostVoidApp(ZApplication):
 
@@ -44,6 +47,7 @@ class LostVoidApp(ZApplication):
     STATUS_ENOUGH_TIMES: ClassVar[str] = '完成通关次数'
     STATUS_AGAIN: ClassVar[str] = '继续挑战'
     STATUS_AGAIN_MATRIX: ClassVar[str] = '继续挑战-矩阵行动'
+    STATUS_MACOS_CYCLE_RETURN: ClassVar[str] = '周奖励目标结束后返回'
 
     def __init__(self, ctx: ZContext,
                  lost_void_debug: bool = False,
@@ -72,13 +76,19 @@ class LostVoidApp(ZApplication):
         # debug
         self.lost_void_debug = lost_void_debug
         self._macos_claim_error: str | None = None
+        self._macos_cycle_progress: LostVoidCycleProgress | None = None
+        self._macos_cycle_unconfirmed: bool = False
 
     @operation_node(name='初始化加载', is_start_node=True)
     def init_for_lost_void(self) -> OperationRoundResult:
+        self._macos_cycle_progress = None
+        self._macos_cycle_unconfirmed = False
         if sys.platform == 'darwin' and self.config.mission_name != '战线肃清':
             return self.round_fail('Mac 迷失之地当前仅支持战线肃清')
         # 检查分配给今天的任务是否完成
         if self.run_record.is_finished_by_day and not (sys.platform == 'darwin' and self.config.is_bounty_commission_mode):
+            if sys.platform == 'darwin' and self.config.is_cycle_reward_mode:
+                return self.round_success(self._cycle_reward_status())
             return self.round_success(LostVoidApp.STATUS_ENOUGH_TIMES)
 
         try:
@@ -202,6 +212,8 @@ class LostVoidApp(ZApplication):
                                       data={'bounty_score': score, 'maximum': 8000})
         if not self.config.is_bounty_commission_mode:
             if self.run_record.is_finished_by_day:
+                if sys.platform == 'darwin' and self.config.is_cycle_reward_mode:
+                    return self.round_success(self.STATUS_MACOS_CYCLE_RETURN)
                 return self.round_success(LostVoidApp.STATUS_ENOUGH_TIMES)
             if self.config.mission_name == '矩阵行动':
                 return self.round_success(LostVoidApp.STATUS_AGAIN_MATRIX)
@@ -841,6 +853,13 @@ class LostVoidApp(ZApplication):
             elif op_result.status == LostVoidRunLevel.STATUS_COMPLETE:
                 self.ctx.lost_void.had_interacted_ophelia_on_current_level = False
                 self.next_region_type = LostVoidRegionType.ENTRY
+                if sys.platform == 'darwin' and self.config.is_cycle_reward_mode:
+                    from zzz_od.operation.gamepad.lost_void_result import (
+                        LostVoidCycleProgress,
+                    )
+
+                    data = op_result.data
+                    self._macos_cycle_progress = data if isinstance(data, LostVoidCycleProgress) else None
 
         return self.round_by_op_result(op_result)
 
@@ -855,7 +874,21 @@ class LostVoidApp(ZApplication):
         if self.use_priority_agent:
             self.run_record.complete_task_force_with_up = True
 
+        if sys.platform == 'darwin' and self.config.is_cycle_reward_mode:
+            progress = self._macos_cycle_progress
+            if progress is None:
+                self._macos_cycle_unconfirmed = True
+                return self.round_success(self.STATUS_MACOS_CYCLE_RETURN)
+            self.run_record.eval_point_complete = progress.eval_point_complete
+            self.run_record.period_reward_complete = progress.period_reward_complete
+
         return self.round_success()
+
+    def _cycle_reward_status(self) -> str:
+        """分别报告本周目标完成和仅到达今天的次数上限。"""
+        if self.run_record.is_finished_by_week:
+            return f'已{self.config.extra_task}'
+        return '达到每日挑战次数上限，本周目标尚未完成'
 
     def _find_ocr_text_mr(self, ocr_result_map: dict[str, MatchResultList], target_text: str) -> MatchResult | None:
         target = gt(target_text, 'game')
@@ -904,6 +937,8 @@ class LostVoidApp(ZApplication):
 
     @node_from(from_name='全部领取')
     @node_from(from_name='全部领取', success=False)
+    @node_from(from_name='识别悬赏委托完成进度', status=STATUS_MACOS_CYCLE_RETURN)
+    @node_from(from_name='通关后处理', status=STATUS_MACOS_CYCLE_RETURN)
     @operation_node(name='完成后返回')
     def back_at_last(self) -> OperationRoundResult:
         if sys.platform == 'darwin':
@@ -912,7 +947,13 @@ class LostVoidApp(ZApplication):
             result = GamepadLostVoidBackToWorld(self.ctx).execute()
             if not result.success:
                 return self.round_by_op_result(result)
-            return self.round_fail(self._macos_claim_error) if self._macos_claim_error else self.round_by_op_result(result)
+            if self._macos_claim_error:
+                return self.round_fail(self._macos_claim_error)
+            if self.config.is_cycle_reward_mode:
+                if self._macos_cycle_unconfirmed:
+                    return self.round_fail('实际通关已记录，周奖励进度未确认')
+                return self.round_success(self._cycle_reward_status())
+            return self.round_by_op_result(result)
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
 

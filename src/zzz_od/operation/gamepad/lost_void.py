@@ -71,7 +71,7 @@ class GamepadLostVoidBackToWorld(GamepadOperation):
         elif page is None:
             entry=GamepadLostVoidTransport(self.ctx)
             entry.last_screenshot=self.last_screenshot
-            if entry._at_hollow_entry():
+            if entry._at_hollow_entry() or entry._at_hollow_hub():
                 page='零号空洞入口'
             else:
                 tabs=nav._read_area('快捷手册','手柄-顶部标签')
@@ -190,10 +190,12 @@ class GamepadLostVoidExit(GamepadOperation):
 
 
 class GamepadLostVoidTransport(GamepadOperation):
-    """打开周期征讨中的迷失之地；不出战、不更改原任务配置。"""
+    """从周期征讨传送到零号空洞，可停在公共入口。"""
 
-    def __init__(self, ctx: ZContext) -> None:
-        super().__init__(ctx, op_name='手柄前往迷失之地', timeout_seconds=90)
+    def __init__(self, ctx: ZContext, stop_at_hollow: bool = False) -> None:
+        op_name = '手柄前往零号空洞' if stop_at_hollow else '手柄前往迷失之地'
+        super().__init__(ctx, op_name=op_name, timeout_seconds=90)
+        self.stop_at_hollow: bool = stop_at_hollow
         self.navigation: GamepadTransportByCompendium = GamepadTransportByCompendium(
             ctx, '作战', '周期征讨', '迷失之地',
         )
@@ -203,6 +205,7 @@ class GamepadLostVoidTransport(GamepadOperation):
         self._unchanged: int = 0
         self._entered_hollow: bool = False
         self._closed_update: bool = False
+        self._returned_from_lost_void: bool = False
 
     def handle_init(self) -> None:
         """每次重新识别当前焦点，不能复用上次确认记录。"""
@@ -213,6 +216,7 @@ class GamepadLostVoidTransport(GamepadOperation):
         self._unchanged = 0
         self._entered_hollow = False
         self._closed_update = False
+        self._returned_from_lost_void = False
 
     def _update_notice(self) -> bool:
         """版本公告仅匹配专属标题，不依据遮罩背后的入口判断完成。"""
@@ -238,9 +242,25 @@ class GamepadLostVoidTransport(GamepadOperation):
                     and nav._text_rect(entry[1], '迷失之地')
                     and nav._text_rect(entry[1], 'A'))
 
+    def _at_hollow_hub(self) -> bool:
+        """两张深层调查卡片同时出现时确认公共入口，不依赖卡片焦点。"""
+        nav = self.navigation
+        nav.last_screenshot = self.last_screenshot
+        for area_name, text in (
+            ('手柄-调查标签', '深层调查'),
+            ('手柄-迷失之地入口', '迷失之地'),
+            ('手柄-枯萎之都入口', '枯萎之都'),
+        ):
+            area = nav._read_area('零号空洞-入口', area_name)
+            if area is None or nav._text_rect(area[1], text) is None:
+                return False
+        return True
+
     @operation_node(name='打开快捷手册', is_start_node=True, node_max_retry_times=6)
     def open_handbook(self) -> OperationRoundResult:
         """复用已确认的大世界快捷键。"""
+        if self.stop_at_hollow and self._at_hollow_hub():
+            return self.round_success('已在零号入口')
         if self._at_hollow_entry() or self._update_notice() or self._entry_name() is not None:
             return self.round_success('已在零号入口')
         self.navigation.last_screenshot = self.last_screenshot
@@ -327,7 +347,10 @@ class GamepadLostVoidTransport(GamepadOperation):
     @node_from(from_name='打开快捷手册', status='已在零号入口')
     @operation_node(name='等待迷失之地入口', node_max_retry_times=20)
     def wait_entry(self) -> OperationRoundResult:
-        """周期与常规入口任一匹配才算抵达。"""
+        """核对调用方选择的公共入口或迷失之地入口。"""
+        if self.stop_at_hollow and self._at_hollow_hub():
+            path = self.save_screenshot(prefix='macos_hollow_zero_hub')
+            return self.round_success('已抵达零号空洞公共入口', data={'screenshot': path})
         if self._update_notice():
             self.navigation.last_screenshot = self.last_screenshot
             area = self.navigation._read_area('迷失之地-入口', '手柄-更新返回')
@@ -337,9 +360,14 @@ class GamepadLostVoidTransport(GamepadOperation):
             return self.round_retry('等待迷失之地更新公告关闭', wait=1)
         name = self._entry_name()
         if name is not None:
+            if self.stop_at_hollow:
+                if not self._returned_from_lost_void:
+                    self.ctx.controller.btn_tap('east')
+                    self._returned_from_lost_void = True
+                return self.round_retry('等待返回公共入口', wait=1)
             self.save_screenshot(prefix='macos_lost_void_entry')
             return self.round_success(name)
-        if not self._entered_hollow and self._at_hollow_entry():
+        if not self.stop_at_hollow and not self._entered_hollow and self._at_hollow_entry():
             self.ctx.controller.btn_tap('south')
             self._entered_hollow = True
         return self.round_retry('等待迷失之地入口加载', wait=1)

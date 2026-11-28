@@ -14,3 +14,10 @@ added_areas:
   - 790
   - 660
   - 970
+- area_name: 手柄-枯萎之都入口
+  area_type: none
+  pc_rect:
+  - 1260
+  - 795
+  - 1695
+  - 970
