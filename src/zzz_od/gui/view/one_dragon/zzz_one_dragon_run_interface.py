@@ -7,12 +7,19 @@ from qfluentwidgets import BodyLabel, FluentIcon, PushButton
 
 from one_dragon.utils.log_utils import log
 from one_dragon_qt.view.one_dragon.one_dragon_run_interface import OneDragonRunInterface
+from zzz_od.gui.view.macos_run_options import (
+    MACOS_OPTION_APP_IDS,
+    MacAppRunner,
+    MacRunOptionsPanel,
+    MacTaskRunDialog,
+)
 from zzz_od.macos.application_capabilities import (
     MACOS_APP_SUMMARY,
     get_macos_app_limits,
     get_macos_app_unavailable_reason,
     get_macos_one_dragon_unavailable_reason,
 )
+from zzz_od.macos.run_request import MacRunOptions
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QWidget
@@ -61,7 +68,19 @@ class ZOneDragonRunInterface(OneDragonRunInterface):
         )
         self.macos_prepare_btn.clicked.connect(self._on_prepare_game_clicked)
         top.layout().addWidget(self.macos_prepare_btn)
+        self.macos_options: MacRunOptionsPanel = MacRunOptionsPanel(self.ctx, 'one_dragon', top)
+        top.layout().addWidget(self.macos_options)
         return top
+
+    def get_content_widget(self) -> QWidget:
+        content = super().get_content_widget()
+        if sys.platform == 'darwin':
+            self.app_runner.state_changed.disconnect(self.on_context_state_changed)
+            self.app_runner.deleteLater()
+            self.app_runner = MacAppRunner(self.ctx)
+            self.app_runner.state_changed.connect(self.on_context_state_changed)
+            self.app_runner.finished.connect(self._on_macos_run_finished)
+        return content
 
     def _init_app_list(self) -> None:
         super()._init_app_list()
@@ -116,6 +135,10 @@ class ZOneDragonRunInterface(OneDragonRunInterface):
         if self._macos_preparation_runner is not None and self._macos_preparation_runner.isRunning():
             log.error('请等待游戏准备结束')
             return
+        if sys.platform == 'darwin':
+            if self.app_runner.isRunning() or not self.ctx.run_context.is_context_stop:
+                return
+            self.app_runner.options = MacRunOptions()
         super().run_app()
 
     def run_app_by_item(self, app: ApplicationGroupConfigItem) -> None:
@@ -123,7 +146,23 @@ class ZOneDragonRunInterface(OneDragonRunInterface):
         if reason is not None:
             log.error(reason)
             return
+        if sys.platform == 'darwin':
+            if self.app_runner.isRunning() or not self.ctx.run_context.is_context_stop:
+                return
+            if self._macos_preparation_runner is not None and self._macos_preparation_runner.isRunning():
+                return
+            options = MacRunOptions()
+            if app.app_id in MACOS_OPTION_APP_IDS:
+                dialog = MacTaskRunDialog(self.ctx, app.app_id, self.window())
+                if not dialog.exec():
+                    return
+                options = dialog.panel.validate_options()
+            self.app_runner.options = options
         super().run_app_by_item(app)
+
+    def _on_macos_run_finished(self) -> None:
+        self.macos_options.show_result(self.app_runner.summary)
+        self.on_context_state_changed()
 
     def _on_prepare_game_clicked(self) -> None:
         """准备操作使用独立工作线程，不注册成一条龙任务。"""

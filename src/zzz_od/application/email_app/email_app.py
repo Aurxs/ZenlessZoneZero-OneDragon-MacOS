@@ -41,7 +41,7 @@ class EmailApp(ZApplication):
     def execute(self) -> OperationResult:
         """Mac 邮件必须整次运行明确授权，不从整组或未确认的 GUI 启动。"""
         if sys.platform == 'darwin' and not getattr(self.ctx, 'macos_claim_all_mail', False):
-            return self.op_fail('Mac 邮件仅限 CLI 手动使用 --app email --claim-all')
+            return self.op_fail('Mac 邮件仅支持单项明确全部领取：GUI 勾选全部领取邮件附件，或 CLI --app email --claim-all')
         return super().execute()
 
     @operation_node(name='选择邮件输入方式', is_start_node=True)

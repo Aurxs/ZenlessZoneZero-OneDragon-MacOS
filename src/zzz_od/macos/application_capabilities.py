@@ -25,7 +25,7 @@ MACOS_CHARGE_PLAN_LIMITS: str = (
 )
 MACOS_APP_SUMMARY: str = (
     'Mac 已支持阿朔占卜、录像店、汀曼咖啡、体力计划、活跃度奖励、丽都周纪和丽都城募；'
-    '恶名狩猎已支持库萨里库，迷失之地支持战线肃清悬赏任务，其他任务以卡片上的适配提示为准'
+    '恶名狩猎可自由选择原副本数据中的 Boss，迷失之地支持战线肃清悬赏任务，其他任务以卡片上的适配提示为准'
 )
 MACOS_SUPPORTED_APP_IDS: frozenset[str] = frozenset({
     application_const.ONE_DRAGON_APP_ID,
@@ -71,8 +71,8 @@ def get_macos_app_limits(app_id: str) -> str:
         charge_plan_const.APP_ID: MACOS_CHARGE_PLAN_LIMITS,
         random_play_const.APP_ID: 'Mac 支持澄辉坪营业点和录像店柜台，可按原候选配置确认宣传员并推荐上架；指定仪玄及柜台营业中返回分支已实测，营业中不更换',
         coffee_app_const.APP_ID: 'Mac 支持澄辉坪汀曼咖啡和六分街咖啡店，单项可限定汀曼特调。六分街首杯免费点单获得 80 电量、已喝提示和返回大世界均已实测',
-        redemption_code_const.APP_ID: 'Mac 国服兑换码仅限 CLI 手动指定一枚；目录只读，不加入日活或领取邮件',
-        email_app_const.APP_ID: 'Mac 邮件仅在 CLI 单项显式指定 --claim-all 时执行，不加入日活；不删除邮件或打开其中链接',
+        redemption_code_const.APP_ID: 'Mac 独立任务和 CLI 均可查看国服目录并明确兑换一枚；不加入日活或领取邮件',
+        email_app_const.APP_ID: 'Mac 独立任务勾选全部领取，或在 CLI 指定 --claim-all。不加入日活，不删除邮件或打开链接',
         engagement_reward_const.APP_ID: 'Mac 支持活跃度领奖、满档判断及已领取跳过',
         city_fund_const.APP_ID: 'Mac 支持现有成长任务与等级奖励领取，不购买等级或升级计划',
     }.get(app_id, MACOS_APP_SUMMARY)

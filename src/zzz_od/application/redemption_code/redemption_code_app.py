@@ -56,7 +56,7 @@ class RedemptionCodeApp(ZApplication):
         if sys.platform == 'darwin':
             code = getattr(self.ctx, 'macos_redeem_code', None)
             if code is None or self.ctx.game_account_config.game_region != 'cn':
-                return self.op_fail('Mac 国服兑换仅限 CLI 手动使用 --app redemption_code --redeem-code CODE')
+                return self.op_fail('Mac 国服兑换仅支持单项明确输入一枚：GUI 输入兑换码，或 CLI --app redemption_code --redeem-code CODE')
             try:
                 code = normalize_code(code)
                 if self.run_record is None or self.run_record.macos_code_attempted(code):

@@ -11,6 +11,13 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Event
 from typing import TYPE_CHECKING
 
+from zzz_od.macos.run_request import (
+    MacRunOptions,
+    describe_request,
+    summarize_result,
+    validate_request,
+)
+
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import FrameType
@@ -19,45 +26,6 @@ if TYPE_CHECKING:
         ApplicationRunResult,
     )
     from zzz_od.context.zzz_context import ZContext
-
-
-def validate_request(ctx: ZContext, app_id: str) -> None:
-    """在连接采集和手柄前拒绝未知、内部或尚未适配的任务。"""
-    from one_dragon.base.config.game_account_config import GamePlatformEnum
-    from zzz_od.macos.application_capabilities import (
-        get_macos_one_dragon_unavailable_reason,
-    )
-
-    if ctx.game_account_config.platform != GamePlatformEnum.MACOS_PLAYCOVER.value.value:
-        raise ValueError('请先在 GUI 账户管理中将当前账户设为 macOS PlayCover')
-    if not ctx.run_context.is_app_registered(app_id) or (
-        app_id != 'one_dragon' and not ctx.run_context.is_app_standalone_available(app_id)
-    ):
-        raise ValueError(f'未知或不可独立调用的任务：{app_id}')
-    reason = ctx.get_application_unavailable_reason(app_id)
-    if reason is None and app_id == 'one_dragon':
-        reason = get_macos_one_dragon_unavailable_reason(ctx)
-    if reason is not None:
-        raise ValueError(reason)
-
-
-def describe_request(ctx: ZContext, app_id: str) -> dict[str, object]:
-    """预览已保存配置，不初始化模型、采集或输入，也不重置运行记录。"""
-    from zzz_od.macos.application_capabilities import get_macos_app_limits
-
-    app_ids = [app_id]
-    if app_id == 'one_dragon':
-        group = ctx.app_group_manager.get_one_dragon_group_config(ctx.current_instance_idx)
-        app_ids = [item.app_id for item in group.app_list if item.enabled]
-    return {
-        'instance_idx': ctx.current_instance_idx,
-        'app_id': app_id,
-        'tasks': [{
-            'app_id': item,
-            'name': ctx.run_context.get_application_name(item),
-            'limits': get_macos_app_limits(item),
-        } for item in app_ids],
-    }
 
 
 def run_session(
@@ -87,34 +55,6 @@ def run_session(
             ctx.run_context.stop_running()
             pump()
         executor.shutdown(wait=True)
-
-
-def summarize_result(ctx: ZContext, result: ApplicationRunResult) -> tuple[dict[str, object], int]:
-    """应用组完成后核对启用任务记录，不能把子任务失败当成命令成功。"""
-    from one_dragon.base.operation.application.application_run_context import (
-        RunFinishReason,
-    )
-    from one_dragon.base.operation.application_run_record import AppRunRecord
-
-    failed_apps: list[str] = []
-    if result.app_id == 'one_dragon':
-        group = ctx.app_group_manager.get_one_dragon_group_config(ctx.current_instance_idx)
-        for item in group.app_list:
-            if not item.enabled:
-                continue
-            record = ctx.run_context.get_run_record(item.app_id, ctx.current_instance_idx)
-            if record is not None and record.run_status == AppRunRecord.STATUS_FAIL:
-                failed_apps.append(item.app_id)
-    success = result.finish_reason == RunFinishReason.COMPLETED and not failed_apps
-    operation_result = ctx.run_context.last_application_result
-    return {
-        'success': success,
-        'app_id': result.app_id,
-        'instance_idx': result.instance_idx,
-        'finish_reason': str(result.finish_reason),
-        'status': operation_result.status if operation_result is not None else None,
-        'failed_apps': failed_apps,
-    }, 0 if success else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,12 +127,12 @@ def main(argv: list[str] | None = None) -> int:
         ctx = ZContext()
         if args.redeem_code is not None and ctx.game_account_config.game_region != 'cn':
             raise ValueError('Mac 兑换码仅支持已配置的国服账户')
-        ctx.macos_redeem_code = args.redeem_code
-        ctx.macos_claim_all_mail = args.claim_all
-        ctx.macos_resume_lost_void = args.resume_lost_void
-        ctx.macos_resume_store_refreshed = args.resume_store_refreshed
-        ctx.macos_resume_signin_reward = args.resume_signin_reward
-        ctx.macos_tinman_only = args.tinman_only
+        options = MacRunOptions(
+            redeem_code=args.redeem_code, claim_all_mail=args.claim_all,
+            resume_lost_void=args.resume_lost_void,
+            resume_store_refreshed=args.resume_store_refreshed,
+            resume_signin_reward=args.resume_signin_reward, tinman_only=args.tinman_only,
+        )
         # 预览只注册工厂，不调用会加载模型和刷新日记录的 init。
         ctx.register_application_factory()
         ctx.app_group_manager.set_default_apps(ctx.run_context.default_group_apps)
@@ -230,7 +170,8 @@ def main(argv: list[str] | None = None) -> int:
                         Foundation.NSDate.dateWithTimeIntervalSinceNow_(0.01),
                     )
 
-                result = run_session(ctx, args.app, pump, interrupted)
+                with options.scoped(ctx, args.app):
+                    result = run_session(ctx, args.app, pump, interrupted)
                 if interrupted.is_set():
                     raise KeyboardInterrupt
                 output, exit_code = summarize_result(ctx, result)
