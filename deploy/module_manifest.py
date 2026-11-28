@@ -2,6 +2,7 @@
 import sys
 if not getattr(sys, 'frozen', False):
     import AppKit
+    import CoreAudio
     import CoreMedia
     import Foundation
     import Quartz
@@ -19,6 +20,7 @@ if not getattr(sys, 'frozen', False):
     import datetime
     import difflib
     import dispatch
+    import fcntl
     import gc
     import gettext
     import glob
@@ -145,10 +147,11 @@ if not getattr(sys, 'frozen', False):
     from scipy.fft import irfft, next_fast_len, rfft
     from scipy.io import wavfile
     from scipy.io.wavfile import WavFileWarning
-    from scipy.signal import butter, filtfilt, resample_poly
+    from scipy.signal import butter, filtfilt, firwin, lfilter, resample_poly
     from scipy.spatial import KDTree
     from shapely.geometry import Polygon
     from soundcard.mediafoundation import SoundcardRuntimeWarning
+    from statistics import median
     from threading import Event, Lock, RLock
     from types import FrameType, ModuleType, TracebackType
     from typing import Any, BinaryIO, Callable, ClassVar, Dict, IO, Iterable, List, Literal, NamedTuple, Optional, Protocol, TYPE_CHECKING, Tuple, Type, TypeVar, Union, cast
