@@ -1,0 +1,12 @@
+sub_dir: ios_gamepad
+template_id: shiyu_reward_badge
+template_name: 式舆可领奖红色提示
+template_shape: polygon
+auto_mask: true
+point_list:
+- 148, 947
+- 173, 947
+- 175, 952
+- 164, 970
+- 159, 971
+- 146, 952

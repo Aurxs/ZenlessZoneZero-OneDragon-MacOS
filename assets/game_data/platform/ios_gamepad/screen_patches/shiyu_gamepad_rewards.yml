@@ -1,0 +1,58 @@
+screen_id: shiyu_gamepad_rewards
+screen:
+  screen_id: shiyu_gamepad_rewards
+  screen_name: 式舆防卫战-剧变奖励
+  pc_alt: false
+  area_list:
+  - area_name: 奖励标题
+    area_type: text
+    id_mark: true
+    pc_rect:
+    - 420
+    - 204
+    - 785
+    - 280
+    text: 剧变节点奖励领取
+    lcs_percent: 0.5
+  - area_name: 领取按钮
+    area_type: none
+    pc_rect:
+    - 1240
+    - 307
+    - 1476
+    - 391
+  - area_name: 防线列表
+    area_type: none
+    pc_rect:
+    - 447
+    - 352
+    - 746
+    - 734
+  - area_name: 奖励状态
+    area_type: none
+    pc_rect:
+    - 1240
+    - 402
+    - 1464
+    - 879
+  - area_name: 作战记录
+    area_type: none
+    pc_rect:
+    - 1400
+    - 10
+    - 1780
+    - 96
+  - area_name: 剧变页签
+    area_type: none
+    pc_rect:
+    - 351
+    - 790
+    - 659
+    - 964
+  - area_name: 节点退出
+    area_type: none
+    pc_rect:
+    - 1614
+    - 982
+    - 1907
+    - 1075

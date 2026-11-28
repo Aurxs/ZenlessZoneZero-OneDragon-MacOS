@@ -15,6 +15,8 @@ from zzz_od.operation.predefined_team_recognizer import (
 )
 
 if TYPE_CHECKING:
+    from one_dragon.base.geometry.rectangle import Rect
+    from one_dragon.base.matcher.match_result import MatchResultList
     from one_dragon.base.operation.operation_round_result import OperationRoundResult
     from zzz_od.context.zzz_context import ZContext
 
@@ -118,12 +120,7 @@ class GamepadChoosePredefinedTeam(GamepadOperation):
             if len(members) != 3 or members != team.agent_id_list:
                 return self.round_fail('游戏编队成员与 GUI 配置不一致，请同步预备编队')
             self._verified_members = members
-        selected = any(
-            'SELECTED' in text.upper()
-            and target_area.rect.x1 < match.center.x < target_area.rect.x2
-            and target_area.rect.y1 < match.center.y < target_area.rect.y2
-            for text, matches in words.items() for match in matches
-        )
+        selected = self.is_target_selected(words, target_area.rect)
         if selected:
             self.save_screenshot(prefix='macos_team_selected')
             self.ctx.controller.btn_tap('start')
@@ -149,6 +146,15 @@ class GamepadChoosePredefinedTeam(GamepadOperation):
             )
             self.ctx.controller.btn_tap(key)
         return self.round_retry('等待目标编队选中', wait=0.6)
+
+    def is_target_selected(self, words: dict[str, MatchResultList], card: Rect) -> bool:
+        """确认标准预备编队的已选标记位于目标卡片中。"""
+        return any(
+            'SELECTED' in text.upper()
+            and card.x1 < match.center.x < card.x2
+            and card.y1 < match.center.y < card.y2
+            for text, matches in words.items() for match in matches
+        )
 
     @node_from(from_name='选择目标编队')
     @operation_node(name='核对编队返回', node_max_retry_times=8, timeout_seconds=12)
@@ -192,6 +198,13 @@ class GamepadFocusPredefinedTeam(GamepadOperation):
         self._pending = None
         self._unchanged = 0
 
+    def find_current_focus(self, words: dict[str, MatchResultList]) -> Rect | None:
+        """普通编队画面只有一张黄色框。多选玩法可用本页提示区分焦点。"""
+        if self.last_screenshot is None:
+            return None
+        frames = find_yellow_focus_frames(self.last_screenshot, 750, 850, 240, 300)
+        return frames[0] if len(frames) == 1 else None
+
     @operation_node(name='定位编队', is_start_node=True, node_max_retry_times=65)
     def focus_team(self) -> OperationRoundResult:
         """每次按键后核对黄框或卡片重叠，不按发送次数推断翻页成功。"""
@@ -209,11 +222,11 @@ class GamepadFocusPredefinedTeam(GamepadOperation):
         areas = [self.ctx.screen_loader.get_area('编队选择', f'编队槽位{i}') for i in range(6)]
         if any(area is None for area in areas):
             return self.round_fail('编队槽位区域缺失')
-        frames = find_yellow_focus_frames(self.last_screenshot, 750, 850, 240, 300)
-        if len(frames) != 1:
+        focus_frame = self.find_current_focus(words)
+        if focus_frame is None:
             return self.round_retry('等待编队黄色焦点', wait=0.6)
-        focus = min(range(6), key=lambda i: (areas[i].center.x - frames[0].center.x) ** 2
-                    + (areas[i].center.y - frames[0].center.y) ** 2)
+        focus = min(range(6), key=lambda i: (areas[i].center.x - focus_frame.center.x) ** 2
+                    + (areas[i].center.y - focus_frame.center.y) ** 2)
         names = tuple(find_team_name(words, area.rect) or '' for area in areas)
         if not all(names):
             return self.round_retry('等待六个可见编队标题', wait=0.6)

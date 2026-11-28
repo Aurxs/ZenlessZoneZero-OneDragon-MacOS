@@ -47,12 +47,14 @@ MACOS_SUPPORTED_APP_IDS: frozenset[str] = frozenset({
     'predefined_team_checker',
     'intel_board',
     'notify',
+    'shiyu_defense',
 })
 
 
 def get_macos_app_limits(app_id: str) -> str:
     """让每个任务显示自身范围，避免商店按钮误显示战斗限制。"""
     return {
+        'shiyu_defense': 'Mac 支持剧变普通双阶段及第五防线三间。第五防线可保留已有成绩并续打，已实机核对 5/5 和当前档位领奖。',
         'notify': 'Mac 使用当前账户的运行记录和通知渠道发送结果汇总，列出成功、失败及可用的体力估算。',
         'intel_board': 'Mac 支持恶名狩猎和专业挑战室的零电量战斗代行，不接剧情；第一队叶瞬光完整周期1000及返回已验，其他队伍沿原成员核对与战斗策略',
         'auto_battle': 'Mac 原生手柄独立助手：沿原策略等待战斗，支持暂停、恢复、停止及释放；从大世界、手柄战斗或战况菜单启动',

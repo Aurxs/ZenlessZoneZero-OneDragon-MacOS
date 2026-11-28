@@ -1,0 +1,345 @@
+screen_id: shiyu_gamepad
+screen:
+  screen_id: shiyu_gamepad
+  screen_name: 式舆防卫战-手柄
+  app_id: shiyu_defense
+  pc_alt: false
+  area_list:
+  - area_name: 手柄-前哨档案
+    area_type: text
+    pc_rect:
+    - 1490
+    - 22
+    - 1736
+    - 78
+    text: 战报
+    lcs_percent: 1
+  - area_name: 手柄-前次记录
+    area_type: text
+    pc_rect:
+    - 470
+    - 175
+    - 1080
+    - 395
+    text: 前次行动最佳记录
+    lcs_percent: 1
+  - area_name: 手柄-剧变进度
+    area_type: none
+    pc_rect:
+    - 347
+    - 795
+    - 660
+    - 965
+  - area_name: 手柄-节点区域
+    area_type: none
+    pc_rect:
+    - 412
+    - 204
+    - 1520
+    - 695
+  - area_name: 手柄-防线1
+    area_type: none
+    pc_rect:
+    - 430
+    - 482
+    - 605
+    - 654
+  - area_name: 手柄-防线2
+    area_type: none
+    pc_rect:
+    - 648
+    - 236
+    - 826
+    - 400
+  - area_name: 手柄-防线3
+    area_type: none
+    pc_rect:
+    - 865
+    - 482
+    - 1051
+    - 654
+  - area_name: 手柄-防线4
+    area_type: none
+    pc_rect:
+    - 1090
+    - 236
+    - 1268
+    - 400
+  - area_name: 手柄-防线5
+    area_type: none
+    pc_rect:
+    - 1288
+    - 452
+    - 1513
+    - 691
+  - area_name: 手柄-选关选择
+    area_type: text
+    pc_rect:
+    - 1620
+    - 995
+    - 1747
+    - 1052
+    text: 选择
+    lcs_percent: 1
+  - area_name: 手柄-防线标题
+    area_type: none
+    pc_rect:
+    - 129
+    - 216
+    - 515
+    - 267
+  - area_name: 手柄-防线选择
+    area_type: text
+    pc_rect:
+    - 1090
+    - 997
+    - 1206
+    - 1056
+    text: 选择
+    lcs_percent: 1
+  - area_name: 手柄-出战准备详情
+    area_type: text
+    pc_rect:
+    - 1374
+    - 996
+    - 1550
+    - 1057
+    text: 关卡详情
+    lcs_percent: 1
+  - area_name: 手柄-预备出战
+    area_type: text
+    pc_rect:
+    - 1685
+    - 998
+    - 1815
+    - 1059
+    text: 预备出战
+    lcs_percent: 1
+  - area_name: 手柄-结算目标
+    area_type: none
+    pc_rect:
+    - 72
+    - 609
+    - 631
+    - 855
+  - area_name: 手柄-结果退出
+    area_type: none
+    pc_rect:
+    - 1470
+    - 976
+    - 1890
+    - 1049
+  - area_name: 手柄-第1队弱点
+    area_type: none
+    pc_rect:
+    - 773
+    - 469
+    - 1246
+    - 580
+  - area_name: 手柄-第1队抗性
+    area_type: none
+    pc_rect:
+    - 773
+    - 592
+    - 1246
+    - 707
+  - area_name: 手柄-第2队弱点
+    area_type: none
+    pc_rect:
+    - 1314
+    - 469
+    - 1784
+    - 580
+  - area_name: 手柄-第2队抗性
+    area_type: none
+    pc_rect:
+    - 1314
+    - 593
+    - 1784
+    - 707
+  - area_name: 手柄-出战确认
+    area_type: none
+    pc_rect:
+    - 1614
+    - 993
+    - 1859
+    - 1058
+  - area_name: 手柄-满员计数
+    area_type: text
+    pc_rect:
+    - 1670
+    - 29
+    - 1773
+    - 72
+    text: 6/6
+    lcs_percent: 1
+  - area_name: 手柄-层间交互键
+    area_type: template
+    pc_rect:
+    - 1423
+    - 1004
+    - 1489
+    - 1070
+    template_sub_dir: ios_gamepad
+    template_id: dialog_a
+    template_match_threshold: 0.8
+  - area_name: 手柄-可领奖红标
+    area_type: template
+    pc_rect:
+    - 136
+    - 935
+    - 189
+    - 980
+    template_sub_dir: ios_gamepad
+    template_id: shiyu_reward_badge
+    template_match_threshold: 0.9
+  - area_name: 手柄-本期最佳总分
+    area_type: text
+    pc_rect:
+    - 120
+    - 199
+    - 455
+    - 261
+    text: 本期最佳总分
+    lcs_percent: 1
+  - area_name: 手柄-三间框
+    area_type: none
+    pc_rect:
+    - 718
+    - 185
+    - 1837
+    - 891
+  - area_name: 手柄-房间标题
+    area_type: none
+    pc_rect:
+    - 123
+    - 208
+    - 628
+    - 268
+  - area_name: 手柄-房间详情总得分
+    area_type: none
+    pc_rect:
+    - 701
+    - 633
+    - 1265
+    - 704
+  - area_name: 手柄-房间下一步
+    area_type: text
+    pc_rect:
+    - 1562
+    - 998
+    - 1847
+    - 1055
+    text: 下一步
+    lcs_percent: 1
+  - area_name: 手柄-第五防线规则
+    area_type: text
+    pc_rect:
+    - 515
+    - 239
+    - 1150
+    - 328
+    text: 第五防线相关规则
+    lcs_percent: 1
+  - area_name: 手柄-规则返回
+    area_type: text
+    pc_rect:
+    - 886
+    - 887
+    - 1040
+    - 940
+    text: 返回
+    lcs_percent: 1
+  - area_name: 手柄-单队满员计数
+    area_type: text
+    pc_rect:
+    - 1670
+    - 29
+    - 1773
+    - 72
+    text: 3/3
+    lcs_percent: 1
+  - area_name: 手柄-房间1状态
+    area_type: none
+    pc_rect:
+    - 762
+    - 215
+    - 1113
+    - 284
+  - area_name: 手柄-房间1弱点
+    area_type: none
+    pc_rect:
+    - 1314
+    - 222
+    - 1794
+    - 316
+  - area_name: 手柄-房间1抗性
+    area_type: none
+    pc_rect:
+    - 1314
+    - 314
+    - 1794
+    - 408
+  - area_name: 手柄-房间2状态
+    area_type: none
+    pc_rect:
+    - 762
+    - 439
+    - 1113
+    - 508
+  - area_name: 手柄-房间2弱点
+    area_type: none
+    pc_rect:
+    - 1314
+    - 446
+    - 1794
+    - 540
+  - area_name: 手柄-房间2抗性
+    area_type: none
+    pc_rect:
+    - 1314
+    - 538
+    - 1794
+    - 632
+  - area_name: 手柄-房间3状态
+    area_type: none
+    pc_rect:
+    - 762
+    - 663
+    - 1113
+    - 732
+  - area_name: 手柄-房间3弱点
+    area_type: none
+    pc_rect:
+    - 1314
+    - 670
+    - 1794
+    - 764
+  - area_name: 手柄-房间3抗性
+    area_type: none
+    pc_rect:
+    - 1312
+    - 744
+    - 1815
+    - 873
+  - area_name: 手柄-房间1角色头像
+    area_type: none
+    pc_rect:
+    - 779
+    - 347
+    - 959
+    - 402
+  - area_name: 手柄-房间2角色头像
+    area_type: none
+    pc_rect:
+    - 779
+    - 571
+    - 959
+    - 626
+  - area_name: 手柄-房间3角色头像
+    area_type: none
+    pc_rect:
+    - 779
+    - 795
+    - 959
+    - 850

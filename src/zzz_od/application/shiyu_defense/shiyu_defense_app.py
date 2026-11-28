@@ -1,4 +1,5 @@
 import re
+import sys
 from typing import ClassVar
 
 from one_dragon.base.geometry.point import Point
@@ -42,8 +43,11 @@ class ShiyuDefenseApp(ZApplication):
     STATUS_NEXT_NODE: ClassVar[str] = '下一节点'
     STATUS_ROOM_COMPLETE: ClassVar[str] = '房间挑战完成'
     STATUS_ALL_ROOMS_COMPLETE: ClassVar[str] = '所有房间完成'
+    STATUS_MACOS: ClassVar[str] = '手柄式舆'
+    STATUS_MACOS_ROOMS: ClassVar[str] = '按房间完成第五防线'
+    STATUS_MACOS_CLAIM: ClassVar[str] = '领取当前剧变奖励'
 
-    def __init__(self, ctx: ZContext):
+    def __init__(self, ctx: ZContext) -> None:
         ZApplication.__init__(
             self,
             ctx=ctx, app_id=shiyu_defense_const.APP_ID,
@@ -68,8 +72,135 @@ class ShiyuDefenseApp(ZApplication):
         self.current_room_idx: int = 0
         self.current_room_team_idx: int = -1
         self.room_teams: list[DefensePhaseTeamInfo] = []
+        self._mac_teams: list[int] = []
 
-    @operation_node(name='传送', is_start_node=True)
+    @operation_node(name='选择式舆输入方式', is_start_node=True, screenshot_before_round=False)
+    def choose_input_mode(self) -> OperationRoundResult:
+        """Mac 进入手柄节点，其余平台沿用原式舆流程。"""
+        if sys.platform != 'darwin':
+            return self.round_success()
+        self._mac_teams.clear()
+        return self.round_success(self.STATUS_MACOS)
+
+    @node_from(from_name='选择式舆输入方式', status=STATUS_MACOS)
+    @operation_node(name='手柄前往剧变选关', screenshot_before_round=False, timeout_seconds=100)
+    def mac_transport(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense import GamepadShiyuTransport
+
+        return self.round_by_op_result(GamepadShiyuTransport(self.ctx).execute())
+
+    @node_from(from_name='手柄前往剧变选关')
+    @operation_node(name='手柄核对进场前剧变奖励', node_max_retry_times=8, timeout_seconds=65)
+    def mac_claim_entry_reward(self) -> OperationRoundResult:
+        """从选关页先领取当前有红色提示的奖励，再继续挑战。"""
+        from zzz_od.operation.gamepad.shiyu_defense import GAMEPAD_SCREEN
+        from zzz_od.operation.gamepad.shiyu_rewards import GamepadClaimShiyuRewards
+
+        if self.last_screenshot is None or not all(
+            self.round_by_find_area(self.last_screenshot, GAMEPAD_SCREEN, label).is_success
+            for label in ('手柄-前哨档案', '手柄-选关选择')
+        ):
+            return self.round_retry('等待剧变选关界面和奖励标记', wait=0.8)
+        badge = self.round_by_find_area(self.last_screenshot, GAMEPAD_SCREEN, '手柄-可领奖红标')
+        if not badge.is_success:
+            return self.round_success('当前无剧变领奖提示')
+        return self.round_by_op_result(GamepadClaimShiyuRewards(self.ctx).execute())
+
+    @node_from(from_name='手柄核对进场前剧变奖励')
+    @node_from(from_name='手柄核对节点完成')
+    @operation_node(name='手柄选择剧变节点', screenshot_before_round=False, timeout_seconds=65)
+    def mac_choose_node(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense import GamepadShiyuOpenNode
+
+        result = GamepadShiyuOpenNode(self.ctx).execute()
+        if not result.success:
+            return self.round_by_op_result(result)
+        if result.status == GamepadShiyuOpenNode.STATUS_ALL_DONE:
+            for completed_idx in range(1, result.data['completed'] + 1):
+                self.run_record.add_node_finished(completed_idx)
+            if self.config.critical_max_node_idx != result.data['total']:
+                self.config.critical_max_node_idx = result.data['total']
+            return self.round_success(self.STATUS_MACOS_CLAIM)
+        if result.status == GamepadShiyuOpenNode.STATUS_THREE_ROOMS:
+            return self.round_success(self.STATUS_MACOS_ROOMS)
+        self.current_node_idx = result.data['node_idx']
+        self.phase_idx = 0
+        return self.round_success()
+
+    @node_from(from_name='手柄选择剧变节点', status=None)
+    @operation_node(name='手柄配置双阶段队伍', screenshot_before_round=False, timeout_seconds=420)
+    def mac_prepare_node(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense import GamepadShiyuPrepareNode
+
+        result = GamepadShiyuPrepareNode(self.ctx, self.current_node_idx).execute()
+        if result.success:
+            self._mac_teams = result.data['team_indices']
+        return self.round_by_op_result(result)
+
+    @node_from(from_name='手柄配置双阶段队伍')
+    @operation_node(name='手柄出战', screenshot_before_round=False, timeout_seconds=55)
+    def mac_deploy(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense import GamepadShiyuDeploy
+
+        return self.round_by_op_result(GamepadShiyuDeploy(self.ctx).execute())
+
+    @node_from(from_name='手柄出战')
+    @operation_node(name='手柄自动战斗', screenshot_before_round=False, timeout_seconds=1600)
+    def mac_battle(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense_battle import GamepadShiyuBattle
+
+        first_half = self.phase_idx == 0
+        next_team = self._mac_teams[1] if first_half else None
+        result = GamepadShiyuBattle(self.ctx, self._mac_teams[self.phase_idx], next_team).execute()
+        if not result.success:
+            return self.round_by_op_result(result)
+        if first_half and result.status == GamepadShiyuBattle.STATUS_NEXT_TEAM:
+            self.phase_idx = 1
+            return self.round_wait('开始下一半场')
+        if not first_half and result.status == GamepadShiyuBattle.STATUS_VICTORY:
+            return self.round_success()
+        return self.round_fail('未确认式舆半场转换或最终胜利')
+
+    @node_from(from_name='手柄自动战斗')
+    @operation_node(name='手柄核对节点完成', screenshot_before_round=False, timeout_seconds=65)
+    def mac_finish_node(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense import GamepadShiyuExitResult
+
+        result = GamepadShiyuExitResult(self.ctx, self.current_node_idx).execute()
+        if result.success:
+            self.run_record.add_node_finished(self.current_node_idx)
+        return self.round_by_op_result(result)
+
+    @node_from(from_name='手柄选择剧变节点', status=STATUS_MACOS_ROOMS)
+    @operation_node(name='手柄完成第五防线', screenshot_before_round=False, timeout_seconds=3220)
+    def mac_run_rooms(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.shiyu_defense_rooms import GamepadShiyuRooms
+
+        result = GamepadShiyuRooms(self.ctx).execute()
+        if result.success:
+            for completed_idx in range(1, 6):
+                self.run_record.add_node_finished(completed_idx)
+            if self.config.critical_max_node_idx != 5:
+                self.config.critical_max_node_idx = 5
+        return self.round_by_op_result(result)
+
+    @node_from(from_name='手柄选择剧变节点', status=STATUS_MACOS_CLAIM)
+    @node_from(from_name='手柄完成第五防线')
+    @node_notify(when=NotifyTiming.CURRENT_DONE, detail=True)
+    @operation_node(name='手柄领取剧变奖励', screenshot_before_round=False, timeout_seconds=100)
+    def mac_claim_and_return(self) -> OperationRoundResult:
+        from zzz_od.operation.gamepad.back_to_normal_world import (
+            GamepadBackToNormalWorld,
+        )
+        from zzz_od.operation.gamepad.shiyu_rewards import GamepadClaimShiyuRewards
+
+        reward = GamepadClaimShiyuRewards(self.ctx).execute()
+        if not reward.success:
+            return self.round_by_op_result(reward)
+        return self.round_by_op_result(GamepadBackToNormalWorld(self.ctx).execute())
+
+    @node_from(from_name='选择式舆输入方式')
+    @operation_node(name='传送')
     def tp(self) -> OperationRoundResult:
         op = TransportByCompendium(self.ctx, '作战', '式舆防卫战', '剧变节点')
         return self.round_by_op_result(op.execute())
