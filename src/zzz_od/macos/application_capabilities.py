@@ -65,7 +65,7 @@ def get_macos_app_limits(app_id: str) -> str:
         'notorious_hunt': 'Mac 支持自由选择原副本数据中的Boss及原难度、鸣徽、编队；库萨里库免费周期、双子和未知无报酬已实测，按实际次数与结果更新计划',
         'ridu_weekly': 'Mac 支持领取已完成九宫格积分与积分特赏，不代做周任务',
         charge_plan_const.APP_ID: MACOS_CHARGE_PLAN_LIMITS,
-        random_play_const.APP_ID: 'Mac 支持澄辉坪营业点、随机或按原候选配置定位并确认宣传员、推荐上架；指定仪玄分支已验，其他人物待实测，营业中不更换',
+        random_play_const.APP_ID: 'Mac 支持澄辉坪营业点和录像店柜台，可按原候选配置确认宣传员并推荐上架；指定仪玄及柜台营业中返回分支已实测，营业中不更换',
         coffee_app_const.APP_ID: 'Mac 已验证澄辉坪汀曼特调与今日已喝；其他入口和额外咖啡尚未实测',
         redemption_code_const.APP_ID: 'Mac 国服兑换码仅限 CLI 手动指定一枚；目录只读，不加入日活或领取邮件',
         email_app_const.APP_ID: 'Mac 邮件仅在 CLI 单项显式指定 --claim-all 时执行，不加入日活；不删除邮件或打开其中链接',

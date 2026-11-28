@@ -226,7 +226,10 @@ class RandomPlayApp(GamepadMenuDelayMixin, ZApplication):
         if sys.platform == 'darwin':
             from zzz_od.operation.gamepad.transport import GamepadTransport
 
-            if self.config.transport_point != RandomPlayTransportPoint.POINT_2.value.value:
+            if self.config.transport_point not in (
+                RandomPlayTransportPoint.POINT_1.value.value,
+                RandomPlayTransportPoint.POINT_2.value.value,
+            ):
                 return self.round_fail(f'Mac 尚未支持录像店入口的转向移动：{item.value}')
             return self.round_by_op_result(
                 GamepadTransport(self.ctx, item.area_name, item.tp_name).execute()
@@ -242,6 +245,10 @@ class RandomPlayApp(GamepadMenuDelayMixin, ZApplication):
         澄辉坪-录像店营业点：传送落点已正对入口，直接交互
         :return:
         """
+        if sys.platform == 'darwin' and self.config.transport_point == RandomPlayTransportPoint.POINT_1.value.value:
+            from zzz_od.operation.gamepad.shop_approach import GamepadApproachShop
+
+            return self.round_by_op_result(GamepadApproachShop(self.ctx, '18号').execute())
         if sys.platform != 'darwin' and self.config.transport_point in {
             RandomPlayTransportPoint.POINT_1.value.value,
             RandomPlayTransportPoint.POINT_3.value.value,
@@ -259,16 +266,14 @@ class RandomPlayApp(GamepadMenuDelayMixin, ZApplication):
     @node_from(from_name='移动交互')
     @operation_node(name='交互对话', node_max_retry_times=10)
     def handle_interaction_dialog(self) -> OperationRoundResult:
+        if self.config.transport_point == RandomPlayTransportPoint.POINT_1.value.value:
+            return self.round_success()
         if sys.platform == 'darwin':
             from zzz_od.operation.gamepad.dialog import GamepadChooseDialogOption
 
             return self.round_by_op_result(
                 GamepadChooseDialogOption(self.ctx, '查看经营状况').execute()
             )
-        # 录像店-柜台交互后没有选项对话，直接交给经营画面加载节点
-        if self.config.transport_point == RandomPlayTransportPoint.POINT_1.value.value:
-            return self.round_success()
-
         # 录像店营业点交互后的选项对话框，优先选择“查看经营状况”
         area = self.ctx.screen_loader.get_area('影像店营业', '右侧选项区域')
         result = self.round_by_ocr_and_click(self.last_screenshot, '查看经营状况', area=area)
