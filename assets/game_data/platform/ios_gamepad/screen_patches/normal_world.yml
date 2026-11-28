@@ -7,3 +7,24 @@ added_areas:
   - 490
   - 1920
   - 815
+- area_name: 手柄-附近互动目标
+  area_type: none
+  pc_rect:
+  - 140
+  - 120
+  - 1810
+  - 800
+- area_name: 手柄-启用互动提示
+  area_type: none
+  pc_rect:
+  - 1410
+  - 1010
+  - 1498
+  - 1065
+- area_name: 手柄-嗷呜名牌
+  area_type: none
+  pc_rect:
+  - 570
+  - 115
+  - 1320
+  - 620

@@ -57,6 +57,9 @@ class GamepadTransport(GamepadOperation):
         ('澄辉坪', '阿朔'),
         ('澄辉坪', '汀曼咖啡'),
         ('澄辉坪', '录像店营业点'),
+        ('录像店', '柜台'),
+        ('六分街', '咖啡店'),
+        ('六分街', '报刊亭'),
     }
 
     def __init__(self, ctx: ZContext, area_name: str, tp_name: str) -> None:
@@ -138,7 +141,7 @@ class GamepadTransport(GamepadOperation):
 
     @operation_node(name='检查手柄传送目标', is_start_node=True, screenshot_before_round=False)
     def check_target(self) -> OperationRoundResult:
-        """仅接入当前已建档区域中的三个日常目标。"""
+        """仅接入原日常应用使用且已登记的区域与地点。"""
         if (self.area_name, self.tp_name) not in self.SUPPORTED_TARGETS:
             return self.round_fail(f'Mac 地图传送尚未支持 {self.area_name}/{self.tp_name}')
         return self.round_success()

@@ -1,3 +1,4 @@
+import sys
 from enum import Enum
 
 from one_dragon.base.operation.application.application_config import ApplicationConfig
@@ -23,7 +24,8 @@ class CoffeeConfig(ApplicationConfig):
 
     @property
     def transport_point(self) -> str:
-        return self.get('transport_point', CoffeeTransportPoint.POINT_1.value.value)
+        default = CoffeeTransportPoint.POINT_2 if sys.platform == 'darwin' else CoffeeTransportPoint.POINT_1
+        return self.get('transport_point', default.value.value)
 
     @transport_point.setter
     def transport_point(self, new_value: str) -> None:
