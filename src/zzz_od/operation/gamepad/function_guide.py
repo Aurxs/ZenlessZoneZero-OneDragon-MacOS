@@ -61,34 +61,41 @@ class GamepadOpenFunction(_GamepadRewardOperation):
         self._focus_unknown_count = 0
         self._themed_last_move = None
 
-    def _themed_intel_card(self) -> tuple[MatLike, Rect] | None:
+    def _themed_card(self, screenshot: MatLike | None, name: str) -> tuple[MatLike, Rect] | None:
         """用同一画面的手柄提示、分组和卡片文字确认粉色导览。"""
-        if self.target != '情报板' or self.last_screenshot is None:
+        if name not in ('情报板', '仓库') or screenshot is None:
             return None
         cards = Rect(1225, 350, 1800, 945)
         footer = Rect(52, 979, 585, 1057)
-        words = self.ctx.ocr.crop_and_run_ocr(self.last_screenshot, cards)
+        words = self.ctx.ocr.crop_and_run_ocr(screenshot, cards)
         if not {'COMMUNITY', '仓库', '个人主页', '情报板'}.issubset(words):
             return None
-        hints = self.ctx.ocr.crop_and_run_ocr(self.last_screenshot, footer)
+        hints = self.ctx.ocr.crop_and_run_ocr(screenshot, footer)
         if not {'导览套件', '选择', '返回'}.issubset(hints):
             return None
-        target = words['情报板']
+        target = words[name]
         if len(target) != 1 or target.max is None:
             return None
-        return self.last_screenshot[cards.y1:cards.y2, cards.x1:cards.x2], target.max.rect
+        return screenshot[cards.y1:cards.y2, cards.x1:cards.x2], target.max.rect
 
-    def _select_themed_intel(self, image: MatLike, target: Rect) -> OperationRoundResult:
+    def is_guide_visible(self, screenshot: MatLike | None) -> bool:
+        """从当前帧识别普通或主题导览，供仓库等功能返回时核对。"""
+        if screenshot is None:
+            return False
+        return (self.round_by_find_area(screenshot, '功能导览', '标题').is_success
+                or self._themed_card(screenshot, '仓库') is not None)
+
+    def _select_themed_card(self, image: MatLike, target: Rect) -> OperationRoundResult:
         """粉色导览文字在图标下方，只在唯一焦点和目标确切对齐时确认。"""
         frames = themed_intel_focus(image)
         if len(frames) != 1:
-            return self.round_retry('等待粉色情报板唯一卡片焦点，未发送输入', wait=0.8)
+            return self.round_retry('等待粉色导览唯一卡片焦点，未发送输入', wait=0.8)
         focus = frames[0]
         if focus.x1 < target.center.x < focus.x2 and focus.y1 < target.center.y <= focus.y2 + 35:
             self._save_evidence('function_selected')
             self.ctx.controller.btn_tap('south')
             self._entered = True
-            return self.round_retry('等待情报板打开', wait=0.7)
+            return self.round_retry(f'等待{self.target}打开', wait=0.7)
         if target.center.y > focus.y2 + 35:
             key = 'dpad_down'
         elif target.center.y < focus.y1:
@@ -105,13 +112,13 @@ class GamepadOpenFunction(_GamepadRewardOperation):
     def select_function(self) -> OperationRoundResult:
         """LT 与菜单键同时保持打开导览，每次移焦后重新读图。"""
         visible = self.round_by_find_area(self.last_screenshot, '功能导览', '标题').is_success
-        themed_card = None if visible else self._themed_intel_card()
+        themed_card = None if visible else self._themed_card(self.last_screenshot, self.target)
         if self._entered:
             if not visible and themed_card is None:
                 return self.round_success('功能入口已选择')
             return self.round_retry('等待功能入口切换', wait=1)
         if themed_card is not None:
-            return self._select_themed_intel(*themed_card)
+            return self._select_themed_card(*themed_card)
         if visible:
             area = self._read_area('功能导览', '手柄-卡片')
             if area is None:

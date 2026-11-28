@@ -65,6 +65,7 @@ def read_preset_charge(ctx: ZContext, screen: MatLike | None) -> tuple[int, int]
 def read_focused_choice(
     ctx: ZContext, screen: MatLike | None, area_name: str, names: tuple[str, ...],
     screen_name: str = '实战模拟室', border_gap: int = 5, allow_corner_gap: bool = False,
+    reread_card_name: bool = False,
 ) -> tuple[str | None, set[str]]:
     """一次 OCR 匹配名称和完整黄框，同时返回可见目标。"""
     area = read_preset_area(ctx, screen, area_name, screen_name)
@@ -79,6 +80,7 @@ def read_focused_choice(
     )
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     selected: set[str] = set()
+    frames: list[tuple[int, int, int, int]] = []
     for contour in contours:
         x, y, width, height = cv2.boundingRect(contour)
         if width < 150 or height < 100:
@@ -90,6 +92,7 @@ def read_focused_choice(
                         border[:, :12].any(axis=1).mean(), border[:, -12:].any(axis=1).mean())
             if not allow_corner_gap or min(coverage) < 0.6 or cv2.contourArea(cv2.convexHull(contour)) / (width * height) < 0.85:
                 continue
+        frames.append((x, y, width, height))
         for text, matches in results.items():
             name = text.replace(' ', '')
             target = matches.max
@@ -97,6 +100,13 @@ def read_focused_choice(
                 continue
             if x < target.x < target.x + target.w < x + width and y < target.y < target.y + target.h < y + height:
                 selected.add(name)
+    if reread_card_name and not selected and len(frames) == 1:
+        # 横向整行 OCR 偶尔把巡防卡片的名字拆为几段。只复读唯一完整黄框内的单行标题。
+        x, y, width, _ = frames[0]
+        crop = image[y + 13:y + 65, x + 18:x + width - 16]
+        name = ctx.ocr.run_ocr_single_line(crop, threshold=0.85).replace(' ', '')
+        if name in names:
+            return name, visible | {name}
     return (next(iter(selected)) if len(selected) == 1 else None), visible
 
 

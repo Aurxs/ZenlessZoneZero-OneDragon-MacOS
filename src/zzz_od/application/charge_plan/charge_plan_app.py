@@ -84,6 +84,7 @@ class ChargePlanApp(ZApplication):
         self.double_reward_checked = False
         for plan in self.config.plan_list:
             plan.skipped = False
+            plan.skip_reason = ''
         current_dt = self.run_record.get_current_dt()
         if self.config.try_reset_plan_times_by_dt(current_dt):
             log.info('已按游戏刷新日重置体力计划已运行次数 %s', current_dt)

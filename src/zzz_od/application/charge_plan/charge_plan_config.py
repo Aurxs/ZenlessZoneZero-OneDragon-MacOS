@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass, field, fields
+from datetime import date
 from enum import Enum
 from typing import TYPE_CHECKING, ClassVar
 
@@ -10,6 +11,8 @@ from one_dragon.base.config.config_item import ConfigItem
 from one_dragon.base.config.yaml_config import YamlConfig
 from one_dragon.base.operation.application.application_config import ApplicationConfig
 from zzz_od.application.charge_plan import charge_plan_const
+
+MACOS_RESERVE_DAILY_LIMIT: int = 320
 
 
 class CardNumEnum(Enum):
@@ -43,6 +46,12 @@ class ChargePlanItem:
     notorious_hunt_buff_num: int = 1  # 恶名狩猎 选择的buff
     plan_id: str | None = None  # 计划的唯一标识符
     skipped: bool = field(default=False, repr=False, metadata={'persist': False})  # 单次运行中是否跳过
+    skip_reason: str = field(default='', repr=False, compare=False, metadata={'persist': False})
+
+    def mark_skipped(self, reason: str) -> None:
+        """保留本次跳过的原因，供运行结果展示。"""
+        self.skipped = True
+        self.skip_reason = reason
 
     def __post_init__(self) -> None:
         if self.plan_id is None:
@@ -375,6 +384,21 @@ class ChargePlanConfig(ApplicationConfig):
     @property
     def is_restore_charge_enabled(self) -> bool:
         return self.restore_charge != RestoreChargeEnum.NONE.value.value
+
+    def get_macos_reserve_limit(self, day: date) -> int:
+        """返回指定日历日的有效储蓄额度，过期和无效设置显示为零。"""
+        if self.get('macos_reserve_date') != day.isoformat():
+            return 0
+        limit = self.get('macos_reserve_limit', 0)
+        return limit if type(limit) is int and 0 < limit <= MACOS_RESERVE_DAILY_LIMIT else 0
+
+    def set_macos_reserve_limit(self, day: date, limit: int) -> None:
+        """一次保存日期和额度，零表示撤销当天授权。"""
+        if type(limit) is not int or not 0 <= limit <= MACOS_RESERVE_DAILY_LIMIT:
+            raise ValueError('储蓄电量额度超出范围')
+        self.update('macos_reserve_date', day.isoformat(), save=False)
+        self.update('macos_reserve_limit', limit, save=False)
+        self.save()
 
     # 运行态/身份字段(set_config 拒绝;详见 spec v5 _RO_FIELDS)
     _RO_FIELDS: ClassVar[set[str]] = {'plan_id', 'last_daily_reset_dt', 'skip_plan'}

@@ -1,0 +1,55 @@
+screen_id: charge_balance_gamepad
+screen:
+  screen_id: charge_balance_gamepad
+  screen_name: 体力资源核账-手柄
+  pc_alt: false
+  area_list:
+  - area_name: 手册-当前电量
+    area_type: none
+    pc_rect:
+    - 1283
+    - 47
+    - 1417
+    - 87
+  - area_name: 手册-储蓄电量
+    area_type: none
+    pc_rect:
+    - 1498
+    - 47
+    - 1578
+    - 87
+  - area_name: 手册-以太电池
+    area_type: none
+    pc_rect:
+    - 1656
+    - 47
+    - 1710
+    - 87
+  - area_name: 仓库-标题
+    area_type: none
+    pc_rect:
+    - 62
+    - 115
+    - 347
+    - 163
+  - area_name: 仓库-当前电量
+    area_type: none
+    pc_rect:
+    - 1199
+    - 34
+    - 1327
+    - 66
+  - area_name: 仓库-菲林
+    area_type: none
+    pc_rect:
+    - 1648
+    - 31
+    - 1782
+    - 71
+  - area_name: 仓库-菲林图标
+    area_type: none
+    pc_rect:
+    - 1784
+    - 27
+    - 1838
+    - 78

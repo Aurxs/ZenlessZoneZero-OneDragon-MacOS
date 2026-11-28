@@ -84,3 +84,10 @@ added_areas:
   - 654
   - 1210
   - 712
+- area_name: 手柄-恢复页确认
+  area_type: none
+  pc_rect:
+  - 955
+  - 747
+  - 1290
+  - 814

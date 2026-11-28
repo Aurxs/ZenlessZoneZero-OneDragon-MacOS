@@ -7,7 +7,10 @@ from datetime import date, datetime
 from typing import TYPE_CHECKING, ClassVar
 from zoneinfo import ZoneInfo
 
-from zzz_od.application.charge_plan.charge_plan_config import RestoreChargeEnum
+from zzz_od.application.charge_plan.charge_plan_config import (
+    CardNumEnum,
+    RestoreChargeEnum,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -21,20 +24,38 @@ def _nonnegative(value: int, label: str) -> None:
         raise ValueError(f'{label}必须为已核实的非负整数')
 
 
-def remaining_plan_energy(plans: Sequence[ChargePlanItem]) -> int:
-    """只计算明确卡数的模拟室和普通巡防；跳过标记不能抹掉剩余计划。"""
+def reserve_plan_cost(plan: ChargePlanItem, observed_cost: int | None = None) -> int | None:
+    """从原计划取消耗，默认卡数必须由同一目标的预设证实。"""
+    if plan.tab_name != '训练' or plan.level != '默认等级' or plan.is_agent_plan:
+        return None
+    if plan.category_name == '区域巡防':
+        return 60
+    if plan.category_name == '专业挑战室':
+        return 40
+    if plan.category_name != '实战模拟室':
+        return None
+    if plan.card_num in ('1', '2', '3', '4', '5'):
+        return int(plan.card_num) * 20
+    if plan.card_num == CardNumEnum.DEFAULT.value.value and observed_cost in (20, 40, 60, 80, 100):
+        return observed_cost
+    return None
+
+
+def remaining_plan_energy(
+    plans: Sequence[ChargePlanItem], *, observed_cost: int | None = None,
+) -> int:
+    """按真实未完成次数计算额度，默认卡数只使用当前预设实测值。"""
+    if observed_cost is not None and len(plans) != 1:
+        raise ValueError('实际消耗必须属于当前唯一体力计划')
     total = 0
     for plan in plans:
         _nonnegative(plan.run_times, '已完成次数')
         _nonnegative(plan.plan_times, '计划次数')
         if plan.plan_times == 0 or plan.run_times > plan.plan_times:
             raise ValueError('计划次数无效，不能据此领取储蓄电量')
-        if plan.category_name == '实战模拟室' and plan.card_num in ('1', '2', '3', '4', '5'):
-            cost = int(plan.card_num) * 20
-        elif plan.category_name == '区域巡防' and not plan.is_agent_plan:
-            cost = 60
-        else:
-            raise ValueError('储蓄额度需要明确卡数的模拟室或普通区域巡防计划')
+        cost = reserve_plan_cost(plan, observed_cost)
+        if cost is None or observed_cost is not None and observed_cost != cost:
+            raise ValueError('储蓄额度需要已确认消耗的模拟室、区域巡防或专业挑战室计划')
         total += (plan.plan_times - plan.run_times) * cost
     return total
 

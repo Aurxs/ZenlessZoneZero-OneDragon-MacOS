@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from typing import TYPE_CHECKING
 
 import cv2
@@ -10,7 +11,7 @@ import cv2
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.utils import debug_utils
-from zzz_od.operation.gamepad.focus import highlight_mask
+from zzz_od.operation.gamepad.focus import has_filled_highlight, highlight_mask
 from zzz_od.operation.gamepad.gamepad_operation import GamepadOperation
 from zzz_od.operation.gamepad.rewards import GamepadOpenDailyCompendium
 from zzz_od.operation.gamepad.transport import find_yellow_focus_frames
@@ -19,12 +20,78 @@ from zzz_od.operation.gamepad.transport_by_compendium import (
 )
 
 if TYPE_CHECKING:
+    from cv2.typing import MatLike
+
+    from one_dragon.base.matcher.match_result import MatchResultList
     from one_dragon.base.operation.operation_round_result import OperationRoundResult
     from zzz_od.application.charge_plan.charge_plan_config import (
         ChargePlanConfig,
         ChargePlanItem,
     )
     from zzz_od.context.zzz_context import ZContext
+
+
+def ether_synthesis_materials(
+    words: dict[str, MatchResultList], require_sufficient: bool = True,
+) -> dict[str, int] | None:
+    """单枚电池必须有唯一标题、数量和当前配方的三项足额读数。"""
+    inventory: list[int] = []
+    quantities: list[int] = []
+    materials: dict[int, list[int]] = {1: [], 60: [], 100: []}
+    for text, matches in words.items():
+        compact = ''.join(text.split())
+        title = re.fullmatch(r'以太电池[×xX](\d+)', compact)
+        quantity = re.fullmatch(r'合成数量[×xX](\d+)', compact)
+        ratio = re.fullmatch(r'(\d{1,9})/(1|60|100)', compact)
+        for match in matches:
+            if match.center.x <= 1200:
+                continue
+            if title and 150 < match.center.y < 350:
+                inventory.append(int(title[1]))
+            if quantity and 400 < match.center.y < 600:
+                quantities.append(int(quantity[1]))
+            if ratio and 600 < match.center.y < 960:
+                materials[int(ratio[2])].append(int(ratio[1]))
+    if len(inventory) != 1 or quantities != [1] or any(len(values) != 1 for values in materials.values()):
+        return None
+    if require_sufficient and any(materials[required][0] < required for required in materials):
+        return None
+    return {'inventory': inventory[0], 'ticket': materials[1][0],
+            'charge': materials[60][0], 'denny': materials[100][0]}
+
+
+def _green_a_for_label(screen: MatLike, words: dict[str, MatchResultList], label: str) -> bool:
+    """只认按钮左侧同排的绿色A，不借用页脚或其他按钮的提示。"""
+    labels = [match for text, matches in words.items() if ''.join(text.split()) == label
+              for match in matches]
+    prompts = [match for text, matches in words.items() if text == 'A' for match in matches]
+    pairs = [(button, prompt) for button in labels for prompt in prompts
+             if abs(button.center.y - prompt.center.y) < 30
+             and 0 < button.x - prompt.right_bottom.x < 200]
+    if len(pairs) != 1:
+        return False
+    rect = pairs[0][1].rect
+    crop = screen[rect.y1:rect.y2, rect.x1:rect.x2]
+    return bool(crop.size and cv2.countNonZero(cv2.inRange(
+        cv2.cvtColor(crop, cv2.COLOR_RGB2HSV), (54, 75, 95), (88, 255, 255),
+    )) >= 45)
+
+
+def _single_battery_confirmation_state(words: dict[str, MatchResultList]) -> str:
+    """过渡缺字只等新帧；三项完整且明确改变配方才拒绝。"""
+    expected = {'电量': '60', '储值电卡': '1', '丁尼': '100'}
+    actual: dict[str, str] = {}
+    for name in expected:
+        labels = [match for text, matches in words.items() if text == name for match in matches]
+        if len(labels) != 1:
+            return 'wait'
+        label = labels[0]
+        numbers = [text for text, matches in words.items() if text.isdigit() for match in matches
+                   if abs(match.center.x - label.center.x) < 40 and 0 < label.center.y - match.center.y < 55]
+        if len(numbers) != 1:
+            return 'wait'
+        actual[name] = numbers[0]
+    return 'ok' if actual == expected else 'invalid'
 
 
 class GamepadOpenChargeResources(GamepadOperation):
@@ -179,22 +246,34 @@ class GamepadPrepareEtherBattery(GamepadOperation):
 class GamepadCloseEtherBattery(GamepadOperation):
     """退出电池合成及来源弹窗，不领取、使用或销毁物品。"""
 
-    def __init__(self, ctx: ZContext) -> None:
+    def __init__(self, ctx: ZContext, allow_obtained_receipt: bool = False) -> None:
         super().__init__(ctx, op_name='手柄退出电池合成', timeout_seconds=30)
+        self.allow_obtained_receipt: bool = allow_obtained_receipt
         self.navigation: GamepadTransportByCompendium = GamepadTransportByCompendium(ctx, '日常', '')
         self._backs: int = 0
+        self._receipt_dismissed: bool = False
 
     def handle_init(self) -> None:
         self._backs = 0
+        self._receipt_dismissed = False
 
     @operation_node(name='返回电池合成入口', is_start_node=True, node_max_retry_times=12)
     def close(self) -> OperationRoundResult:
         """逐层识别来源页面后返回，未知页面不猜按键。"""
         if self.last_screenshot is None:
             return self.round_retry('等待返回截图', wait=0.8)
+        words = self.ctx.ocr.run_ocr(self.last_screenshot)
+        if {'获得', '以太电池', '1'} <= words.keys():
+            if self.allow_obtained_receipt and not self._receipt_dismissed:
+                confirmations = [match for text, matches in words.items() if text == '确认'
+                                 for match in matches if has_filled_highlight(self.last_screenshot, match.rect, 'yellow')]
+                if len(confirmations) == 1:
+                    self.save_screenshot(prefix='macos_ether_battery_delayed_receipt')
+                    self.ctx.controller.btn_tap('south')
+                    self._receipt_dismissed = True
+            return self.round_retry('等待已核账电池的延迟获得页关闭', wait=1)
         if self.round_by_find_area(self.last_screenshot, '大世界-普通', '快捷手册').is_success:
             return self.round_success('已退出电池合成并返回大世界')
-        words = self.ctx.ocr.run_ocr(self.last_screenshot)
         self.navigation.last_screenshot = self.last_screenshot
         item_page = any('道具处理' in text for text in words) and any('以太电池' in text for text in words)
         detail = any('以太电池' in text for text in words) and any('获取' in text and '合成' in text for text in words)
@@ -219,6 +298,10 @@ class GamepadSynthesizeEtherBattery(GamepadOperation):
         self._confirmed: bool = False
         self._obtained: bool = False
         self._shortage: bool = False
+        self._item_selected: bool = False
+        self._materials_before: dict[str, int] | None = None
+        self._materials_after: dict[str, int] | None = None
+        self._requested_at: float = 0
 
     def handle_init(self) -> None:
         self._dismissed = False
@@ -226,6 +309,28 @@ class GamepadSynthesizeEtherBattery(GamepadOperation):
         self._confirmed = False
         self._obtained = False
         self._shortage = False
+        self._item_selected = False
+        self._materials_before = None
+        self._materials_after = None
+        self._requested_at = 0
+
+    def _record_obtained(self) -> None:
+        """弹窗或四项余额任一确认后只保存一次原计划计数。"""
+        if self._obtained:
+            return
+        self.save_screenshot(prefix='macos_ether_battery_obtained')
+        self.config.add_plan_run_times(self.plan)
+        self._obtained = True
+
+    def _balance_matches_synthesis(self, after: dict[str, int]) -> bool:
+        """电池、票券和丁尼精确增减；六分钟内电量只容一次自然回复。"""
+        before = self._materials_before
+        elapsed = time.monotonic() - self._requested_at
+        return bool(before is not None and 0 <= elapsed < 360
+                    and after['inventory'] == before['inventory'] + 1
+                    and after['ticket'] == before['ticket'] - 1
+                    and after['denny'] == before['denny'] - 100
+                    and before['charge'] - after['charge'] in (59, 60))
 
     @operation_node(name='准备单枚电池合成', is_start_node=True, screenshot_before_round=False)
     def prepare(self) -> OperationRoundResult:
@@ -248,36 +353,61 @@ class GamepadSynthesizeEtherBattery(GamepadOperation):
         words = self.ctx.ocr.run_ocr(self.last_screenshot)
         text = ''.join(words).replace(' ', '')
         if self._confirmed and '获得' in words and '以太电池' in words and '1' in words:
-            if not self._obtained:
-                self.config.add_plan_run_times(self.plan)
-                self._obtained = True
+            self._record_obtained()
             if not self._dismissed and self._press_highlighted(words, '确认'):
                 self._dismissed = True
             return self.round_retry('等待单枚电池获得页关闭', wait=1)
-        if self._requested and re.search(r'确认使用.*合成1个[\[「【]?以太电池', text):
+        if self._requested and any(re.fullmatch(
+            r'确认使用下列素材合成1个[\[「【]以太电池[\]」】]吗[？?]?', ''.join(word.split()),
+        ) for word in words):
+            material_state = _single_battery_confirmation_state(words)
+            if material_state == 'invalid':
+                return self.round_fail('单枚电池确认页的材料数量与计划不符，未确认合成')
+            if material_state != 'ok':
+                return self.round_retry('等待单枚电池确认页的三项完整材料', wait=1)
             if not self._confirmed and self._press_highlighted(words, '确认'):
                 self._confirmed = True
             return self.round_retry('等待单枚电池合成结果', wait=1)
         if '道具处理' in words and '以太电池' in text:
             if self._obtained:
                 return self.round_success('已确认获得单枚以太电池')
+            if self._confirmed:
+                after = ether_synthesis_materials(words, require_sufficient=False)
+                if after is not None and self._balance_matches_synthesis(after):
+                    self._materials_after = after
+                    self._record_obtained()
+                    return self.round_success('已核对单枚电池和三项素材的实际变化')
+                return self.round_retry('等待单枚电池四项余额与本笔合成一致', wait=1)
             if '合成素材不足' in text and not self._confirmed:
                 self._shortage = True
                 return self.round_success('合成素材不足')
-            if not self._requested and '合成数量×1' in text:
-                if self._press_highlighted(words, '合成'):
+            if not self._requested:
+                materials = ether_synthesis_materials(words)
+                if materials is None:
+                    return self.round_retry('等待单枚电池名称、数量及三项足额素材', wait=1)
+                panels = find_yellow_focus_frames(self.last_screenshot, 550, 750, 700, 900, min_edge_presence=0.8)
+                if len(panels) == 1 and panels[0].x1 > 1200 and _green_a_for_label(self.last_screenshot, words, '合成'):
+                    self.save_screenshot(prefix='macos_ether_battery_request')
+                    self._materials_before = materials
+                    self._requested_at = time.monotonic()
+                    self.ctx.controller.btn_tap('south')
                     self._requested = True
+                elif not panels and not self._item_selected:
+                    cards = find_yellow_focus_frames(self.last_screenshot, 100, 160, 100, 160, min_edge_presence=0.8)
+                    if len(cards) == 1 and cards[0].x2 < 1200 and _green_a_for_label(self.last_screenshot, words, '选择'):
+                        self.ctx.controller.btn_tap('south')
+                        self._item_selected = True
+                        return self.round_retry('已选择电池，等待右侧合成面板焦点', wait=1)
             return self.round_retry('等待合成确认或获得证据', wait=1)
         return self.round_retry('等待明确的单枚电池合成页面', wait=1)
 
-    def _press_highlighted(self, words: dict, label: str) -> bool:
+    def _press_highlighted(self, words: dict[str, MatchResultList], label: str) -> bool:
         """仅当唯一文字按钮位于黄色焦点内才按A。"""
-        from zzz_od.operation.gamepad.focus import has_filled_highlight
-
         matches = [match for word, values in words.items() if word.replace(' ', '') == label
                    for match in values if has_filled_highlight(self.last_screenshot, match.rect, 'yellow')]
         if len(matches) != 1:
             return False
+        self.save_screenshot(prefix='macos_ether_battery_confirm')
         self.ctx.controller.btn_tap('south')
         return True
 
@@ -286,8 +416,9 @@ class GamepadSynthesizeEtherBattery(GamepadOperation):
     @node_from(from_name='合成并核对获得', status='合成素材不足')
     @operation_node(name='合成后返回大世界', screenshot_before_round=False, timeout_seconds=40)
     def close(self) -> OperationRoundResult:
-        result = GamepadCloseEtherBattery(self.ctx).execute()
+        result = GamepadCloseEtherBattery(self.ctx, allow_obtained_receipt=self._obtained).execute()
         if not result.success:
             return self.round_by_op_result(result)
         return self.round_success('合成素材不足' if self._shortage else '单枚电池合成完成',
-                                  data={'obtained': int(self._obtained), 'material_insufficient': self._shortage})
+                                  data={'obtained': int(self._obtained), 'material_insufficient': self._shortage,
+                                        'balance_before': self._materials_before, 'balance_after': self._materials_after})

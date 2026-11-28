@@ -41,6 +41,7 @@ from zzz_od.operation.gamepad.expert_challenge import (
 )
 from zzz_od.operation.gamepad.gamepad_operation import GamepadOperation
 from zzz_od.operation.gamepad.notorious_hunt import GamepadHuntBackToWorld
+from zzz_od.operation.gamepad.reserve_charge import reserve_plan_cost
 from zzz_od.operation.gamepad.simulation_preset import (
     SIMULATION_TYPES,
     simulation_targets,
@@ -68,12 +69,14 @@ def validate_macos_charge_plan(config: ChargePlanConfig) -> str | None:
                     for plan in config.plan_list)):
         return '显式Lv.60区域巡防不允许自动恢复电量'
     if config.restore_charge != RestoreChargeEnum.NONE.value.value:
-        from zzz_od.operation.gamepad.restore_reserve_charge import reserve_budget
+        from zzz_od.operation.gamepad.restore_reserve_charge import (
+            charge_restore_budget,
+        )
 
         try:
-            reserve_budget(config)
+            charge_restore_budget(config)
         except (ValueError, TypeError) as error:
-            return f'Mac储蓄恢复未获有效日期及额度许可：{error}'
+            return f'Mac恢复电量配置不可用：{error}'
     plans = list(config.plan_list)
     if config.double_reward:
         try:
@@ -236,7 +239,7 @@ class GamepadChargePlan(GamepadOperation):
         if not result.success:
             return self.round_by_op_result(result)
         if result.status == '合成素材不足':
-            self.current_plan.skipped = True
+            self.current_plan.mark_skipped('合成电池素材不足')
             return self.round_success('合成素材不足，本轮跳过')
         if self.current_plan.run_times != previous_runs + 1:
             return self.round_fail('合成结果未确认新增一次，停止计划')
@@ -285,7 +288,7 @@ class GamepadChargePlan(GamepadOperation):
         result = GamepadCloseTrainingHandbook(self.ctx).execute()
         if not result.success:
             return self.round_by_op_result(result)
-        self.current_plan.skipped = True
+        self.current_plan.mark_skipped('手册未找到培养目标')
         return self.round_success('培养目标本轮跳过')
 
     @node_from(from_name='解析本场培养目标')
@@ -359,25 +362,32 @@ class GamepadChargePlan(GamepadOperation):
             if (self.current_plan is not None and self.current_plan.category_name == '区域巡防'
                     and self.current_plan.level == '等级Lv.60'):
                 return self.round_success(self.STATUS_CHARGE_NOT_ENOUGH)
-            if self.config.restore_charge == RestoreChargeEnum.BACKUP_ONLY.value.value:
-                if self.current_plan is None or self.current_plan.category_name != '区域巡防':
-                    return self.round_fail('最小储蓄补电仅支持已核对的普通巡防')
+            if (self.config.restore_charge != RestoreChargeEnum.NONE.value.value
+                    and self.current_plan is not None
+                    and reserve_plan_cost(self.current_plan, required) == required):
                 return self.round_success('执行最小储蓄补电')
             return self.round_success(self.STATUS_CHARGE_NOT_ENOUGH)
         return self.round_success()
 
     @node_from(from_name='核对单次实际电量', status='执行最小储蓄补电')
-    @operation_node(name='执行最小储蓄补电', screenshot_before_round=False, timeout_seconds=260)
+    @operation_node(name='执行最小储蓄补电', screenshot_before_round=False, timeout_seconds=270)
     def restore_minimum_reserve(self) -> OperationRoundResult:
         """补电和独立对账后重新从原计划选取，绝不增加胜利次数。"""
         if (self.current_plan is not None and self.current_plan.category_name == '区域巡防'
                 and self.current_plan.level == '等级Lv.60'):
             return self.round_fail('显式Lv.60区域巡防不允许自动恢复电量')
+        if not isinstance(self._simulation, GamepadCombatSimulation):
+            return self.round_fail('当前体力副本尚未接入储蓄补电')
         from zzz_od.operation.gamepad.restore_reserve_charge import (
             GamepadRestoreReserveCharge,
         )
 
-        return self.round_by_op_result(GamepadRestoreReserveCharge(self.ctx, self.config).execute())
+        result = GamepadRestoreReserveCharge(self.ctx, self.config, self._simulation).execute()
+        if result.success and result.status == GamepadRestoreReserveCharge.STATUS_SHORTAGE:
+            self.current_charge = result.data['current_charge']
+            self.run_record.record_current_charge_power(self.current_charge)
+            return self.round_success(self.STATUS_CHARGE_NOT_ENOUGH)
+        return self.round_by_op_result(result)
 
     @node_from(from_name='核对单次实际电量')
     @operation_node(name='执行单次挑战')
@@ -398,6 +408,7 @@ class GamepadChargePlan(GamepadOperation):
         return self.round_success()
 
     @node_from(from_name='核对单次实际电量', status=STATUS_CHARGE_NOT_ENOUGH)
+    @node_from(from_name='执行最小储蓄补电', status=STATUS_CHARGE_NOT_ENOUGH)
     @node_from(from_name='执行单次挑战', success=False, status=STATUS_CHARGE_NOT_ENOUGH)
     @operation_node(name='电量不足返回大世界', node_max_retry_times=15, timeout_seconds=90)
     def return_after_shortage(self) -> OperationRoundResult:
@@ -417,9 +428,9 @@ class GamepadChargePlan(GamepadOperation):
                     if required is None:
                         required = following.estimated_charge_power
                     if self.current_charge >= required:
-                        self.current_plan.skipped = True
+                        self.current_plan.mark_skipped('电量不足')
                         return self.round_success(self.STATUS_TRY_NEXT_PLAN)
-                    following.skipped = True
+                    following.mark_skipped('电量不足')
                     following = self.config.get_next_plan(following)
             return self._summary('电量不足，未完成计划保留')
         if self.current_plan is not None and self.current_plan.category_name in ('区域巡防', '专业挑战室', '恶名狩猎'):
@@ -447,7 +458,7 @@ class GamepadChargePlan(GamepadOperation):
         if not result.success:
             return self.round_by_op_result(result)
         if self.current_plan is not None:
-            self.current_plan.skipped = True
+            self.current_plan.mark_skipped('周期挑战还有免费次数，深度追猎未开放')
         return self.round_success()
 
     @node_from(from_name='选择原体力计划', status=STATUS_FINISHED)
@@ -459,4 +470,7 @@ class GamepadChargePlan(GamepadOperation):
             if self.config.plan_list and self.config.all_plan_finished()
             else '没有可运行的计划'
         )
+        causes = dict.fromkeys(plan.skip_reason for plan in self.config.plan_list if plan.skipped and plan.skip_reason)
+        if causes:
+            reason = f'{reason}（{"、".join(causes)}）'
         return self._summary(reason)

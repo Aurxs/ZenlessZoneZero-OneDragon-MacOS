@@ -1,12 +1,20 @@
+import sys
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget
 from qfluentwidgets import (
+    BodyLabel,
     CaptionLabel,
     Dialog,
     FluentIcon,
     LineEdit,
+    MessageBoxBase,
     PrimaryPushButton,
     PushButton,
+    SpinBox,
+    SubtitleLabel,
     ToolButton,
 )
 
@@ -31,6 +39,7 @@ from one_dragon_qt.widgets.setting_card.multi_push_setting_card import (
     MultiLineSettingCard,
     MultiPushSettingCard,
 )
+from one_dragon_qt.widgets.setting_card.push_setting_card import PushSettingCard
 from one_dragon_qt.widgets.setting_card.switch_setting_card import SwitchSettingCard
 from one_dragon_qt.widgets.vertical_scroll_interface import VerticalScrollInterface
 from zzz_od.application.battle_assistant.auto_battle_config import (
@@ -38,6 +47,7 @@ from zzz_od.application.battle_assistant.auto_battle_config import (
 )
 from zzz_od.application.charge_plan import charge_plan_const
 from zzz_od.application.charge_plan.charge_plan_config import (
+    MACOS_RESERVE_DAILY_LIMIT,
     CardNumEnum,
     ChargePlanConfig,
     ChargePlanItem,
@@ -447,6 +457,15 @@ class ChargePlanInterface(VerticalScrollInterface, GroupIdMixin):
         self.daily_reset_plan_times_opt = SwitchSettingCard(icon=FluentIcon.HISTORY, title='每日重置', content='开启后，每天首次运行体力计划前，会将所有体力计划已运行次数清零')
         self.restore_charge_opt = ComboBoxSettingCard(icon=FluentIcon.ADD_TO, title='恢复电量', content='电量不足时尝试按所选方式有效补足缺口', options_enum=RestoreChargeEnum)
         self.content_widget.add_widget(HorizontalSettingCardGroup([self.daily_reset_plan_times_opt, self.restore_charge_opt], spacing=6))
+        if sys.platform == 'darwin':
+            self.macos_reserve_opt: PushSettingCard = PushSettingCard(
+                icon=FluentIcon.HISTORY,
+                title='本日储蓄电量额度',
+                content='今日尚未授权',
+                text='设置',
+            )
+            self.macos_reserve_opt.clicked.connect(self._set_macos_reserve_limit)
+            self.content_widget.add_widget(self.macos_reserve_opt)
 
         self.double_reward_group = ExpandSettingCardGroup(
             icon=FluentIcon.FLAG,
@@ -530,8 +549,42 @@ class ChargePlanInterface(VerticalScrollInterface, GroupIdMixin):
         self.daily_reset_plan_times_opt.init_with_adapter(get_prop_adapter(self.config, 'daily_reset_plan_times'))
         self.double_reward_opt.init_with_adapter(get_prop_adapter(self.config, 'double_reward'))
         self.restore_charge_opt.init_with_adapter(get_prop_adapter(self.config, 'restore_charge'))
+        if hasattr(self, 'macos_reserve_opt'):
+            self._refresh_macos_reserve_limit()
 
         self.combat_simulation_double_reward_config_card.setEnabled(self.config.double_reward)
+
+    @staticmethod
+    def _reserve_day() -> date:
+        return datetime.now(ZoneInfo('Asia/Shanghai')).date()
+
+    def _refresh_macos_reserve_limit(self) -> None:
+        if self.config is None:
+            return
+        limit = self.config.get_macos_reserve_limit(self._reserve_day())
+        self.macos_reserve_opt.setContent(
+            f'北京时间今日累计上限 {limit} 电量' if limit else '今日尚未授权',
+        )
+
+    def _set_macos_reserve_limit(self) -> None:
+        config = self.config
+        if config is None or not self.ctx.run_context.is_context_stop:
+            return
+        today = self._reserve_day()
+        dialog = MessageBoxBase(self.window())
+        dialog.viewLayout.addWidget(SubtitleLabel('设置本日储蓄额度'))
+        instruction = BodyLabel(f'北京时间 {today.isoformat()}。额度含今日已领取电量，填 0 撤销。')
+        instruction.setWordWrap(True)
+        dialog.viewLayout.addWidget(instruction)
+        limit = SpinBox(dialog)
+        limit.setRange(0, MACOS_RESERVE_DAILY_LIMIT)
+        limit.setValue(config.get_macos_reserve_limit(today))
+        dialog.viewLayout.addWidget(limit)
+        dialog.yesButton.setText('保存额度')
+        if (dialog.exec() and self.config is config and self.ctx.run_context.is_context_stop
+                and self._reserve_day() == today):
+            config.set_macos_reserve_limit(today, limit.value())
+        self._refresh_macos_reserve_limit()
 
     def on_double_reward_changed(self, value: bool) -> None:
         self.combat_simulation_double_reward_config_card.setEnabled(value)

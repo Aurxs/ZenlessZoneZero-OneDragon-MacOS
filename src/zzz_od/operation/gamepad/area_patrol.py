@@ -191,7 +191,10 @@ class GamepadAreaPatrol(GamepadCombatSimulation):
         if self.plan.level != '默认等级':
             if len(title[1]) != 1 or len(next(iter(title[1].values()))) != 1:
                 return False
-        selected, _ = read_focused_choice(self.ctx, self.last_screenshot, '手柄-副本列表', charge_mission_names('区域巡防'), '区域巡防', border_gap=35, allow_corner_gap=True)
+        selected, _ = read_focused_choice(
+            self.ctx, self.last_screenshot, '手柄-副本列表', charge_mission_names('区域巡防'), '区域巡防',
+            border_gap=35, allow_corner_gap=True, reread_card_name=True,
+        )
         return selected == self.plan.mission_type_name
 
     def _target_state(self) -> str:
