@@ -13,6 +13,10 @@ from typing import Any
 
 import numpy as np
 
+from one_dragon.base.controller.macos.sck_audio_converter import (
+    CapturedAudio,
+    copy_audio_sample,
+)
 from one_dragon.base.controller.macos.sck_frame_converter import (
     CapturedFrame,
     bgra_buffer_to_rgb,
@@ -131,6 +135,13 @@ class MacWindowCapture:
         self._stream: Any = None
         self._output: Any = None
         self._queue: Any = None
+        self._configuration: Any = None
+        self._audio_control_lock: threading.RLock = threading.RLock()
+        self._audio_queue: Any = None
+        self._audio_callback: Callable[[CapturedAudio], None] | None = None
+        self._audio_error_callback: Callable[[RuntimeError], None] | None = None
+        self._audio_start_pts: float | None = None
+        self._last_audio_error: str | None = None
         self._running: bool = False
         self._active: bool = True
         self._activity_generation: int = 0
@@ -156,6 +167,12 @@ class MacWindowCapture:
         """返回最近一次失败原因，供控制器在无帧时说明原因。"""
         with self._lock:
             return self._last_error or self._freshness_error
+
+    @property
+    def audio_error(self) -> str | None:
+        """声音错误独立记录，不使有效视频帧和窗口就绪状态失效。"""
+        with self._lock:
+            return self._last_audio_error
 
     @property
     def raw_size(self) -> tuple[int, int] | None:
@@ -296,6 +313,9 @@ class MacWindowCapture:
         config.setQueueDepth_(3)
         config.setShowsCursor_(False)
         config.setCapturesAudio_(False)
+        config.setSampleRate_(48000)
+        config.setChannelCount_(2)
+        config.setExcludesCurrentProcessAudio_(True)
         config.setCaptureMicrophone_(False)
         config.setIncludeChildWindows_(False)
         config.setIgnoreShadowsSingleWindow_(True)
@@ -314,6 +334,7 @@ class MacWindowCapture:
             raise MacCaptureError(f'无法注册窗口采集输出: {error}')
         with self._lock:
             self._stream, self._output, self._queue = stream, output, queue
+            self._configuration = config
             self._running = True
             self._active = bool(selected.isOnScreen())
             self._requires_pixel_change = not self._active
@@ -332,6 +353,105 @@ class MacWindowCapture:
             self.stop()
             raise
 
+    def start_audio(
+        self,
+        callback: Callable[[CapturedAudio], None],
+        error_callback: Callable[[RuntimeError], None],
+    ) -> None:
+        """在同一目标流上订阅游戏应用音频，不另录桌面或麦克风。"""
+        with self._audio_control_lock:
+            with self._lock:
+                stream, output, config = self._stream, self._output, self._configuration
+                if not self._running or stream is None or config is None:
+                    raise MacCaptureError('游戏窗口尚未开始采集，声音闪避保持画面识别')
+                if self._audio_queue is not None:
+                    raise MacCaptureError('当前窗口已有声音订阅，请先停止上一场声音识别')
+            cm, dispatch, _, _, sck, _ = _native_api()
+            started_pts = float(cm.CMTimeGetSeconds(cm.CMClockGetTime(cm.CMClockGetHostTimeClock())))
+            queue = dispatch.dispatch_queue_create(b'one_dragon.window_audio', None)
+            success, error = stream.addStreamOutput_type_sampleHandlerQueue_error_(
+                output, sck.SCStreamOutputTypeAudio, queue, None,
+            )
+            if not success:
+                raise MacCaptureError(f'无法注册游戏声音输出: {error}')
+            with self._lock:
+                self._audio_queue = queue
+                self._audio_callback = callback
+                self._audio_error_callback = error_callback
+                self._audio_start_pts = started_pts
+                self._last_audio_error = None
+            try:
+                audio_config = config.copy()
+                audio_config.setCapturesAudio_(True)
+                error, = self._wait(
+                    lambda completion: stream.updateConfiguration_completionHandler_(audio_config, completion),
+                    '启动游戏声音采集',
+                )
+                if error is not None:
+                    raise MacCaptureError(f'无法启动游戏声音采集: {error}')
+                with self._lock:
+                    self._configuration = audio_config
+            except Exception:
+                self.stop_audio()
+                raise
+
+    def stop_audio(self) -> None:
+        """先断开音频消费者，再关闭声音输出；保留现有画面采集。"""
+        with self._audio_control_lock:
+            with self._lock:
+                stream, output, config = self._stream, self._output, self._configuration
+                registered = self._audio_queue is not None
+                self._audio_callback = self._audio_error_callback = None
+                self._audio_start_pts = None
+                self._audio_queue = None
+                running = self._running
+            if not registered or stream is None:
+                return
+            sck = _native_api()[4]
+            if running and config is not None:
+                try:
+                    quiet_config = config.copy()
+                    quiet_config.setCapturesAudio_(False)
+                    error, = self._wait(
+                        lambda completion: stream.updateConfiguration_completionHandler_(quiet_config, completion),
+                        '停止游戏声音采集',
+                    )
+                    if error is None:
+                        with self._lock:
+                            self._configuration = quiet_config
+                    else:
+                        with self._lock:
+                            self._last_audio_error = f'关闭游戏声音配置失败: {error}'
+                except Exception as error:
+                    # 移除声音输出仍须继续，不能因为配置更新失败保留消费者。
+                    with self._lock:
+                        self._last_audio_error = f'关闭游戏声音配置失败: {error}'
+            try:
+                success, error = stream.removeStreamOutput_type_error_(output, sck.SCStreamOutputTypeAudio, None)
+                if not success:
+                    with self._lock:
+                        self._last_audio_error = f'移除游戏声音输出失败: {error}'
+            except Exception as error:
+                with self._lock:
+                    self._last_audio_error = f'移除游戏声音输出失败: {error}'
+
+    def _fail_audio(self, stream: Any, message: str) -> None:
+        """音频失败只通知一次，不使有效画面失效。"""
+        with self._lock:
+            if stream != self._stream:
+                return
+            callback = self._audio_error_callback
+            self._audio_callback = self._audio_error_callback = None
+            if callback is not None:
+                self._last_audio_error = message
+        if callback is not None:
+            try:
+                callback(MacCaptureError(message))
+            except Exception as error:
+                # 界面通知失败也不能中断原生流的停止和资源释放。
+                with self._lock:
+                    self._last_audio_error = f'{message}；通知声音消费者失败: {error}'
+
     def _set_stream_active(self, stream: Any, active: bool) -> None:
         """暂时失活不销毁流；恢复只接受新的 Complete，不复用失活前像素。"""
         with self._lock:
@@ -348,6 +468,8 @@ class MacWindowCapture:
                 '窗口采集已恢复活动，等待新的完整画面' if active
                 else '共享窗口暂不可采集，等待系统恢复；未切换桌面'
             )
+        if not active:
+            self._fail_audio(stream, '游戏窗口暂不可采集，已停止声音闪避并清空录音')
 
     def _fail_stream(self, stream: Any, error: str) -> None:
         """异常、窗口关闭和权限撤销后立即使旧帧失效。"""
@@ -361,6 +483,7 @@ class MacWindowCapture:
             self._last_observation_monotonic = None
             self._freshness_error = None
             self._last_error = error
+        self._fail_audio(stream, error)
 
     def _receive_sample(self, stream: Any, sample: Any, output_type: int) -> None:
         """复制一帧原生像素后覆盖最新帧，不保留原生缓冲的引用。"""
@@ -369,6 +492,32 @@ class MacWindowCapture:
             if not self._running or stream != self._stream:
                 return
             activity_generation = self._activity_generation
+        if output_type == getattr(sck, 'SCStreamOutputTypeAudio', 1):
+            with self._lock:
+                callback = self._audio_callback
+            if callback is None:
+                return
+            try:
+                if not cm.CMSampleBufferIsValid(sample) or not cm.CMSampleBufferDataIsReady(sample):
+                    raise MacCaptureError('游戏声音样本尚未就绪')
+                audio = copy_audio_sample(sample)
+                with self._lock:
+                    if (not self._running or stream != self._stream
+                            or activity_generation != self._activity_generation
+                            or callback is not self._audio_callback):
+                        return
+                    started_pts = self._audio_start_pts
+                # 停止再订阅仍使用同一个 SCStream；按原生样本时间拒绝上一轮排队的数据。
+                if started_pts is None or audio.presentation_time < started_pts:
+                    return
+                now_pts = float(cm.CMTimeGetSeconds(cm.CMClockGetTime(cm.CMClockGetHostTimeClock())))
+                age = now_pts - audio.presentation_time
+                if not -0.05 <= age <= 0.5:
+                    raise MacCaptureError('游戏声音样本时间已过期或不属于当前主机时钟')
+                callback(audio)
+            except Exception as error:
+                self._fail_audio(stream, f'读取游戏声音失败: {error}')
+            return
         if output_type != sck.SCStreamOutputTypeScreen or not cm.CMSampleBufferIsValid(sample):
             return
         try:
@@ -534,9 +683,19 @@ class MacWindowCapture:
 
     def stop(self) -> None:
         """先清空帧和绑定，再停止原生采集，丢弃所有迟到回调。"""
+        with self._audio_control_lock:
+            self._stop_stream()
+
+    def _stop_stream(self) -> None:
+        """与声音订阅串行停止，防止关闭窗口时重新挂入声音输出。"""
+        with self._lock:
+            stream = self._stream
+        self._fail_audio(stream, '游戏窗口采集已停止，已清空声音缓冲')
+        self.stop_audio()
         with self._lock:
             stream, output = self._stream, self._output
             self._stream = self._output = self._queue = None
+            self._configuration = None
             self._running = False
             self._active = False
             self._requires_pixel_change = False

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
 import warnings
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -25,6 +26,11 @@ from zzz_od.context.zzz_context import ZContext
 from zzz_od.yolo.flash_classifier import FlashClassifier
 
 if TYPE_CHECKING:
+    from one_dragon.base.controller.macos.macos_window_capture import MacWindowCapture
+    from one_dragon.base.controller.macos.sck_audio_converter import (
+        CapturedAudio,
+        StreamingAudioConverter,
+    )
     from zzz_od.auto_battle.auto_battle_operator import AutoBattleOperator
 
 
@@ -203,6 +209,146 @@ class AudioTemplateEnum(IntEnum):
     X_DODGE = 3
 
 
+class MacAudioRecorder(AudioRecorder):
+    """只订阅当前窗口的 SCK 音频，复用原模板所需的半秒缓冲和滤波。"""
+
+    def __init__(
+        self,
+        error_callback: Callable[[RuntimeError], None],
+        capture_getter: Callable[[], MacWindowCapture | None],
+    ) -> None:
+        """构造时不访问原生框架、窗口或任何录音设备。"""
+        super().__init__(error_callback)
+        self._capture_getter: Callable[[], MacWindowCapture | None] = capture_getter
+        self._capture: MacWindowCapture | None = None
+        self._native_lock: threading.Lock = threading.Lock()
+        self._lifecycle_lock: threading.Lock = threading.Lock()
+        self._generation: int = 0
+        self._converter: StreamingAudioConverter | None = None
+        self._source_rate: int | None = None
+        self._expected_pts: float | None = None
+        self._started_monotonic: float | None = None
+        self._last_audio_monotonic: float | None = None
+
+    def _reset_mac_audio(self) -> None:
+        """暂停、窗口替换或失效后丢弃录音及滤波尾部。"""
+        with self._update_audio_lock:
+            self.latest_audio = np.zeros(self._sample_rate // 2)
+            self._converter = None
+            self._source_rate = None
+            self._expected_pts = None
+            self._last_audio_monotonic = None
+
+    def start_running_async(self) -> None:
+        """订阅现有流，暂停恢复使用新的轮次拒绝上一轮回调。"""
+        with self._lifecycle_lock:
+            with self._run_lock:
+                if self.running:
+                    return
+                self.running = True
+                self._generation += 1
+                generation = self._generation
+                self._started_monotonic = None
+            self._reset_mac_audio()
+            future = _dodge_check_executor.submit(self._start_mac_audio, generation)
+            future.add_done_callback(thread_utils.handle_future_result)
+
+    def _start_mac_audio(self, generation: int) -> None:
+        """串行增删原生声音订阅，避免快速暂停恢复留下两个消费者。"""
+        with self._native_lock:
+            if not self.running or generation != self._generation:
+                return
+            try:
+                if self._capture is not None:
+                    self._capture.stop_audio()
+                    self._capture = None
+                capture = self._capture_getter()
+                if capture is None:
+                    raise RuntimeError('没有绑定游戏窗口，继续使用画面闪光识别')
+                self._capture = capture
+                capture.start_audio(
+                    lambda audio: self._receive_mac_audio(audio, generation),
+                    lambda error: self._mac_audio_failed(error, generation),
+                )
+                self._started_monotonic = time.monotonic()
+                if not self.running or generation != self._generation:
+                    capture.stop_audio()
+                    self._capture = None
+            except Exception as error:
+                self._mac_audio_failed(RuntimeError(str(error)), generation)
+
+    def _receive_mac_audio(self, audio: CapturedAudio, generation: int) -> None:
+        """重采样保留相位；丢帧、变更采样率时清除旧片段再开始。"""
+        from one_dragon.base.controller.macos.sck_audio_converter import (
+            StreamingAudioConverter,
+        )
+
+        with self._update_audio_lock:
+            if not self.running or generation != self._generation:
+                return
+            discontinuity = (
+                self._expected_pts is not None
+                and abs(audio.presentation_time - self._expected_pts) > 0.002
+            )
+            if self._converter is None or self._source_rate != audio.sample_rate or discontinuity:
+                self._converter = StreamingAudioConverter(audio.sample_rate)
+                self._source_rate = audio.sample_rate
+                self.latest_audio = np.zeros(self._sample_rate // 2)
+            converted = self._converter.push(audio.samples)
+            size = min(converted.size, self.latest_audio.size)
+            if size:
+                self.latest_audio[:-size] = self.latest_audio[size:]
+                self.latest_audio[-size:] = converted[-size:]
+            self._expected_pts = audio.presentation_time + audio.samples.size / audio.sample_rate
+            self._last_audio_monotonic = time.monotonic()
+
+    def _mac_audio_failed(self, error: RuntimeError, generation: int) -> None:
+        """只报告本轮的一次失败，后台释放声音输出，画面识别保持运行。"""
+        with self._run_lock:
+            if generation != self._generation or not self.running:
+                return
+            self.running = False
+        self._reset_mac_audio()
+        log.warning(f'Mac 声音闪避已停用，继续画面识别: {error}')
+        future = _dodge_check_executor.submit(self._release_mac_audio, generation)
+        future.add_done_callback(thread_utils.handle_future_result)
+        if self._error_callback is not None:
+            self._error_callback(error)
+
+    def _release_mac_audio(self, generation: int) -> None:
+        """原生回调不阻塞等待自己的队列；在后台移除失效订阅。"""
+        with self._native_lock:
+            if generation == self._generation and self._capture is not None:
+                self._capture.stop_audio()
+                self._capture = None
+
+    def stop_running(self) -> None:
+        """先作废回调和波形，再释放声音订阅，不停止视频流。"""
+        with self._lifecycle_lock:
+            with self._run_lock:
+                self.running = False
+                self._generation += 1
+            self._reset_mac_audio()
+            with self._native_lock:
+                if self._capture is not None:
+                    self._capture.stop_audio()
+                    self._capture = None
+
+    def get_latest_audio(self) -> np.ndarray:
+        """只提供持续到达的音频，半秒没有新回调时回退画面识别。"""
+        with self._update_audio_lock:
+            if not self.running:
+                return np.empty(0)
+            generation = self._generation
+            last_received = self._last_audio_monotonic
+            started = last_received if last_received is not None else self._started_monotonic
+            stale = started is not None and time.monotonic() - started > 0.5
+            audio = self.latest_audio.copy() if last_received is not None and not stale else np.empty(0)
+        if stale:
+            self._mac_audio_failed(RuntimeError('游戏声音回调已过期，请检查系统屏幕与音频录制权限'), generation)
+        return audio
+
+
 class YoloStateEventEnum(Enum):
     """
     YOLO状态事件枚举类，定义不同的闪避识别事件。
@@ -221,7 +367,11 @@ class AutoBattleDodgeContext:
         self.ctx: ZContext = ctx  # 上下文对象
 
         self._flash_model: FlashClassifier | None = None  # 闪避分类器
-        self._audio_recorder: AudioRecorder = AudioRecorder(self._on_audio_record_error, self._get_game_hwnd)  # 音频录制器
+        self._audio_recorder: AudioRecorder = (
+            MacAudioRecorder(self._on_audio_record_error, self._get_mac_window_capture)
+            if sys.platform == 'darwin'
+            else AudioRecorder(self._on_audio_record_error, self._get_game_hwnd)
+        )
         self._audio_template_fft: np.ndarray | None = None  # 补零后模板的频域数据
         self._audio_corr_mask: np.ndarray | None = None  # 各模板相关结果的有效区间
         self._audio_corr_denominator: np.ndarray | None = None  # 各模板相关系数分母
@@ -249,13 +399,22 @@ class AutoBattleDodgeContext:
             return None
         return controller.game_win.get_hwnd()
 
+    def _get_mac_window_capture(self) -> MacWindowCapture | None:
+        """复用当前控制器的唯一窗口采集，不新建音频目标。"""
+        return getattr(self.ctx.controller, 'window_capture', None)
+
     def _on_audio_record_error(self, error: RuntimeError) -> None:
         """音频录制异常时通知当前运行界面。"""
+        content = (
+            f'游戏声音采集异常，已继续使用画面闪光识别：{error}'
+            if sys.platform == 'darwin'
+            else f'音频录制异常，请检查音频设备/独占模式/默认输出设备：{error}'
+        )
         self.ctx.dispatch_event(
             ContextNotifyEvent.EVENT_ID,
             ContextNotifyEvent.warning(
                 title='声音闪避已停用',
-                content=f'音频录制异常，请检查音频设备/独占模式/默认输出设备：{error}',
+                content=content,
             ),
         )
 
@@ -294,8 +453,8 @@ class AutoBattleDodgeContext:
         self._last_check_dodge_time = 0
         self._last_check_audio_time = 0
 
-        # 当前声音采集使用 Windows 回放设备，其他平台只识别图像闪光。
-        if sys.platform == 'win32':
+        # 两个平台共用生产模板；Mac 原生音频不导入 Windows 回放设备。
+        if sys.platform in ('win32', 'darwin'):
             _dodge_check_executor.submit(self.init_audio_template)
 
     def init_audio_template(self) -> None:
@@ -440,7 +599,7 @@ class AutoBattleDodgeContext:
         :param screenshot_time: 截图时间
         :return: 命中的模板编号，未命中时返回 False
         """
-        if sys.platform != 'win32':
+        if sys.platform not in ('win32', 'darwin'):
             return False
         if not self._check_audio_lock.acquire(blocking=False):
             return False
@@ -529,9 +688,9 @@ class AutoBattleDodgeContext:
 
     def start_context_async(self) -> None:
         """
-        仅 Windows 启动声音录制，其他平台保留图像闪光识别。
+        Windows 沿原录音路径，Mac 订阅当前目标窗口的声音。
         """
-        if sys.platform == 'win32':
+        if sys.platform in ('win32', 'darwin'):
             self._audio_recorder.start_running_async()
 
     def stop_context(self) -> None:
@@ -544,4 +703,5 @@ class AutoBattleDodgeContext:
         """
         App关闭后进行的操作 关闭一切可能资源操作
         """
+        self.stop_context()
         _dodge_check_executor.shutdown(wait=False, cancel_futures=True)
