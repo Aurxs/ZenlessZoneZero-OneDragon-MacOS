@@ -48,12 +48,14 @@ MACOS_SUPPORTED_APP_IDS: frozenset[str] = frozenset({
     'intel_board',
     'notify',
     'shiyu_defense',
+    'drive_disc_dismantle',
 })
 
 
 def get_macos_app_limits(app_id: str) -> str:
     """让每个任务显示自身范围，避免商店按钮误显示战斗限制。"""
     return {
+        'drive_disc_dismantle': 'Mac 按原配置筛选驱动盘，核对游戏的未装备和未锁定规则。已适配 A 级确认，遇到其他未建档的品质确认会停止。',
         'shiyu_defense': 'Mac 支持剧变普通双阶段及第五防线三间。第五防线可保留已有成绩并续打，已实机核对 5/5 和当前档位领奖。',
         'notify': 'Mac 使用当前账户的运行记录和通知渠道发送结果汇总，列出成功、失败及可用的体力估算。',
         'intel_board': 'Mac 支持恶名狩猎和专业挑战室的零电量战斗代行，不接剧情；第一队叶瞬光完整周期1000及返回已验，其他队伍沿原成员核对与战斗策略',

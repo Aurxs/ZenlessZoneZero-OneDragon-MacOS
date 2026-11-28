@@ -1,0 +1,19 @@
+screen_id: storage_wengine
+area_patches:
+  标题-音擎仓库:
+    lcs_percent: 0.88
+    pc_rect:
+    - 55
+    - 112
+    - 339
+    - 163
+added_areas:
+- area_name: 手柄-右肩键提示
+  area_type: text
+  pc_rect:
+  - 1840
+  - 140
+  - 1910
+  - 194
+  text: RB
+  lcs_percent: 0.88

@@ -1,0 +1,97 @@
+screen_id: drive_disc_dismantle
+added_areas:
+- area_name: 手柄-装备显示状态
+  area_type: none
+  pc_rect:
+  - 1505
+  - 22
+  - 1768
+  - 83
+- area_name: 手柄-快速选择提示
+  area_type: none
+  pc_rect:
+  - 231
+  - 998
+  - 501
+  - 1055
+- area_name: 手柄-快速选择弹窗
+  area_type: none
+  pc_rect:
+  - 585
+  - 271
+  - 1334
+  - 912
+- area_name: 手柄-拆解按钮
+  area_type: text
+  pc_rect:
+  - 1602
+  - 869
+  - 1827
+  - 938
+  text: 拆解
+  lcs_percent: 0.88
+- area_name: 手柄-返回提示
+  area_type: none
+  pc_rect:
+  - 1770
+  - 1003
+  - 1881
+  - 1050
+- area_name: 手柄-规则提示
+  area_type: text
+  pc_rect:
+  - 1784
+  - 24
+  - 1910
+  - 79
+  text: LT
+  lcs_percent: 0.88
+- area_name: 手柄-拆解规则正文
+  area_type: none
+  pc_rect:
+  - 426
+  - 186
+  - 1475
+  - 996
+- area_name: 手柄-拆解确认正文
+  area_type: none
+  pc_rect:
+  - 728
+  - 468
+  - 1179
+  - 580
+- area_name: 手柄-拆解确认文字
+  area_type: none
+  pc_rect:
+  - 1080
+  - 621
+  - 1180
+  - 673
+- area_name: 手柄-拆解确认选择提示
+  area_type: none
+  pc_rect:
+  - 909
+  - 704
+  - 1026
+  - 756
+- area_name: 手柄-拆解获得正文
+  area_type: none
+  pc_rect:
+  - 375
+  - 370
+  - 1545
+  - 681
+- area_name: 手柄-拆解获得确认
+  area_type: none
+  pc_rect:
+  - 894
+  - 690
+  - 1042
+  - 761
+- area_name: 手柄-拆解获得选择提示
+  area_type: none
+  pc_rect:
+  - 988
+  - 785
+  - 1115
+  - 845

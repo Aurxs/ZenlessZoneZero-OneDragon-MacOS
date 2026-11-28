@@ -1,0 +1,26 @@
+screen_id: storage_drive_disc
+area_patches:
+  标题-驱动仓库:
+    lcs_percent: 0.88
+    pc_rect:
+    - 55
+    - 112
+    - 339
+    - 163
+added_areas:
+- area_name: 手柄-拆解入口
+  area_type: text
+  pc_rect:
+  - 196
+  - 897
+  - 460
+  - 956
+  text: 拆解
+  lcs_percent: 0.88
+- area_name: 手柄-返回提示
+  area_type: none
+  pc_rect:
+  - 1770
+  - 1010
+  - 1881
+  - 1060

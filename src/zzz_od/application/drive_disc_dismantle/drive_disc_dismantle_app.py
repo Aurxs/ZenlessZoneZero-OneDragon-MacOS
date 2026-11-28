@@ -1,3 +1,5 @@
+import sys
+
 from one_dragon.base.operation.application import application_const
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
@@ -19,7 +21,7 @@ class DriveDiscDismantleApp(ZApplication):
 
     """驱动盘分解:按配置批量分解驱动盘。销毁道具(不可逆),务必核对配置。"""
 
-    def __init__(self, ctx: ZContext):
+    def __init__(self, ctx: ZContext) -> None:
         ZApplication.__init__(
             self,
             ctx=ctx,
@@ -37,7 +39,27 @@ class DriveDiscDismantleApp(ZApplication):
             app_id=drive_disc_dismantle_const.APP_ID,
         )
 
-    @operation_node(name='开始前返回', is_start_node=True)
+    @operation_node(name='选择输入方式', is_start_node=True, screenshot_before_round=False)
+    def choose_input(self) -> OperationRoundResult:
+        """原任务按平台进入对应的仓库与拆解流程。"""
+        return self.round_success('手柄' if sys.platform == 'darwin' else '键鼠')
+
+    @node_from(from_name='选择输入方式', status='手柄')
+    @node_notify(when=NotifyTiming.CURRENT_SUCCESS)
+    @operation_node(name='手柄拆解驱动盘', screenshot_before_round=False)
+    def gamepad_dismantle(self) -> OperationRoundResult:
+        """沿用任务配置和运行记录，先由手柄流程核对候选及库存。"""
+        from zzz_od.operation.gamepad.drive_disc_dismantle import (
+            GamepadDriveDiscDismantle,
+        )
+
+        op = GamepadDriveDiscDismantle(
+            self.ctx, self.config.dismantle_level, self.config.dismantle_abandon,
+        )
+        return self.round_by_op_result(op.execute())
+
+    @node_from(from_name='选择输入方式', status='键鼠')
+    @operation_node(name='开始前返回')
     def back_at_first(self) -> OperationRoundResult:
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
