@@ -7,6 +7,7 @@ from zzz_od.application.daily_signin import daily_signin_const
 from zzz_od.application.daily_signin.daily_signin_config import (
     DailySignInConfig,
 )
+from zzz_od.application.scratch_card import scratch_card_const
 from zzz_od.application.zzz_application import ZApplication
 from zzz_od.context.zzz_context import ZContext
 
@@ -47,6 +48,12 @@ class DailySignInApp(ZApplication):
             return self.round_fail(status='未选择子应用')
 
         if sys.platform == 'darwin':
+            if sub_app_id == scratch_card_const.APP_ID:
+                if getattr(self.ctx, 'macos_resume_signin_reward', False):
+                    return self.round_fail('指定奖励页恢复仅支持卦象集录')
+                from zzz_od.operation.gamepad.scratch_card import GamepadScratchCard
+
+                return self.round_by_op_result(GamepadScratchCard(self.ctx).execute())
             from zzz_od.operation.gamepad.signin import GamepadDailySignIn
 
             return self.round_by_op_result(

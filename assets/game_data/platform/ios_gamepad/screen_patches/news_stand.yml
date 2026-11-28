@@ -1,0 +1,135 @@
+screen_id: news_stand
+added_areas:
+- area_name: 手柄-报纸标题
+  area_type: text
+  pc_rect:
+  - 1038
+  - 100
+  - 1814
+  - 287
+  text: CITYNEWS
+  lcs_percent: 0.82
+- area_name: 手柄-刮刮卡提示
+  area_type: text
+  pc_rect:
+  - 11
+  - 816
+  - 220
+  - 994
+  text: 刮刮卡
+  lcs_percent: 1.0
+- area_name: 手柄-刮刮卡按键
+  area_type: none
+  pc_rect:
+  - 36
+  - 812
+  - 83
+  - 858
+- area_name: 手柄-返回提示
+  area_type: text
+  pc_rect:
+  - 1766
+  - 1012
+  - 1890
+  - 1061
+  text: 返回
+  lcs_percent: 1.0
+- area_name: 手柄-返回按键
+  area_type: none
+  pc_rect:
+  - 1771
+  - 1014
+  - 1808
+  - 1056
+- area_name: 手柄-同类奖励已领
+  area_type: text
+  pc_rect:
+  - 660
+  - 470
+  - 1275
+  - 569
+  text: 今日已经完成过一次相同类型的奖励领取
+  lcs_percent: 1.0
+- area_name: 手柄-确认选择
+  area_type: text
+  pc_rect:
+  - 910
+  - 684
+  - 1033
+  - 742
+  text: 选择
+  lcs_percent: 1.0
+- area_name: 手柄-确认按键
+  area_type: none
+  pc_rect:
+  - 915
+  - 686
+  - 954
+  - 731
+- area_name: 手柄-嗷呜对话正文
+  area_type: none
+  pc_rect:
+  - 450
+  - 835
+  - 1470
+  - 972
+- area_name: 手柄-嗷呜对话按键
+  area_type: none
+  pc_rect:
+  - 1445
+  - 960
+  - 1526
+  - 1035
+- area_name: 手柄-嗷呜对话选项
+  area_type: none
+  pc_rect:
+  - 1330
+  - 490
+  - 1920
+  - 815
+- area_name: 手柄-嗷呜醒来文案
+  area_type: none
+  pc_rect:
+  - 720
+  - 474
+  - 1207
+  - 570
+- area_name: 手柄-嗷呜醒来按键
+  area_type: none
+  pc_rect:
+  - 901
+  - 555
+  - 1016
+  - 647
+- area_name: 手柄-刮刮卡标题
+  area_type: text
+  pc_rect:
+  - 672
+  - 391
+  - 1050
+  - 482
+  text: LUCKY
+  lcs_percent: 1.0
+- area_name: 手柄-每日可刮取一次
+  area_type: text
+  pc_rect:
+  - 688
+  - 635
+  - 915
+  - 694
+  text: 每日可刮取一次
+  lcs_percent: 1.0
+- area_name: 手柄-右杆刮卡提示
+  area_type: none
+  pc_rect:
+  - 820
+  - 726
+  - 1094
+  - 778
+- area_name: 手柄-揭开卡片返回按键
+  area_type: none
+  pc_rect:
+  - 909
+  - 725
+  - 969
+  - 780

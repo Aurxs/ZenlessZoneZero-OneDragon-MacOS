@@ -17,6 +17,8 @@ from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.utils.log_utils import log
 from zzz_od.application.coffee import coffee_app_const
 from zzz_od.application.coffee.coffee_config import CoffeeTransportPoint
+from zzz_od.application.daily_signin import daily_signin_const
+from zzz_od.application.scratch_card import scratch_card_const
 from zzz_od.operation.gamepad.focus import has_filled_highlight
 
 if TYPE_CHECKING:
@@ -262,6 +264,19 @@ class MacBootstrapGameSession(Operation):
             if signin._reward_visible() or signin._result_visible():
                 return self.round_success('已确认签到奖励或结果页面')
             return self.round_fail('未确认签到奖励或结果页面，未发送输入')
+        if getattr(self.ctx.run_context, 'current_app_id', None) == daily_signin_const.APP_ID:
+            from zzz_od.operation.gamepad.scratch_card import GamepadScratchCard
+
+            scratch_card = GamepadScratchCard(self.ctx)
+            scratch_card.last_screenshot = self.last_screenshot
+            if scratch_card.can_resume_open_card():
+                config = self.ctx.run_context.get_config(
+                    app_id=daily_signin_const.APP_ID,
+                    instance_idx=self.ctx.current_instance_idx,
+                    group_id=self.ctx.run_context.current_group_id,
+                )
+                if config.selected_sign == scratch_card_const.APP_ID:
+                    return self.round_success('已确认报刊亭手柄刮刮卡页面')
         if getattr(self.ctx, 'macos_resume_lost_void', False):
             if '继续战线肃清' in self._sent_actions and self.ctx.lost_void.in_normal_world(self.last_screenshot):
                 self.ctx.macos_lost_void_resumed = True
