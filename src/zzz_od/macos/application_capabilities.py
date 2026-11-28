@@ -66,7 +66,7 @@ def get_macos_app_limits(app_id: str) -> str:
         'ridu_weekly': 'Mac 支持领取已完成九宫格积分与积分特赏，不代做周任务',
         charge_plan_const.APP_ID: MACOS_CHARGE_PLAN_LIMITS,
         random_play_const.APP_ID: 'Mac 支持澄辉坪营业点和录像店柜台，可按原候选配置确认宣传员并推荐上架；指定仪玄及柜台营业中返回分支已实测，营业中不更换',
-        coffee_app_const.APP_ID: 'Mac 已验证澄辉坪汀曼特调与今日已喝；其他入口和额外咖啡尚未实测',
+        coffee_app_const.APP_ID: 'Mac 支持澄辉坪汀曼咖啡和六分街咖啡店，单项可限定汀曼特调。六分街首杯免费点单获得 80 电量、已喝提示和返回大世界均已实测',
         redemption_code_const.APP_ID: 'Mac 国服兑换码仅限 CLI 手动指定一枚；目录只读，不加入日活或领取邮件',
         email_app_const.APP_ID: 'Mac 邮件仅在 CLI 单项显式指定 --claim-all 时执行，不加入日活；不删除邮件或打开其中链接',
         engagement_reward_const.APP_ID: 'Mac 支持活跃度领奖、满档判断及已领取跳过',

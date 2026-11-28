@@ -11,9 +11,12 @@ from typing import TYPE_CHECKING, ClassVar
 import cv2
 
 from one_dragon.base.geometry.rectangle import Rect
+from one_dragon.base.operation.application import application_const
 from one_dragon.base.operation.operation import Operation
 from one_dragon.base.operation.operation_node import operation_node
 from one_dragon.utils.log_utils import log
+from zzz_od.application.coffee import coffee_app_const
+from zzz_od.application.coffee.coffee_config import CoffeeTransportPoint
 from zzz_od.operation.gamepad.focus import has_filled_highlight
 
 if TYPE_CHECKING:
@@ -239,6 +242,17 @@ class MacBootstrapGameSession(Operation):
 
     def _prepare_from_screen(self) -> OperationRoundResult:
         """按正面证据选择手柄登录、触屏设置和返回路径。"""
+        if getattr(self.ctx.run_context, 'current_app_id', None) == coffee_app_const.APP_ID:
+            from zzz_od.operation.gamepad.coffee_menu import coffee_already_drunk_prompt
+
+            if coffee_already_drunk_prompt(self):
+                config = self.ctx.run_context.get_config(
+                    app_id=coffee_app_const.APP_ID,
+                    instance_idx=self.ctx.current_instance_idx,
+                    group_id=application_const.DEFAULT_GROUP_ID,
+                )
+                if config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
+                    return self.round_success('已确认六分街的今日已喝手柄提示')
         if getattr(self.ctx, 'macos_resume_signin_reward', False):
             # 仅显式续接已确认的签到奖励或结果页，未知画面不能继续。
             from zzz_od.operation.gamepad.signin import GamepadDailySignIn

@@ -7,12 +7,12 @@ area_patches:
     - 1920
     - 815
   对话框标题-汀曼大师:
+    lcs_percent: 0.9
     pc_rect:
     - 820
     - 770
     - 1100
     - 860
-    lcs_percent: 0.9
 added_areas:
 - area_name: 手柄-电量奖励
   area_type: none
@@ -30,3 +30,52 @@ added_areas:
   - 985
   text: 还请明天再来吧
   lcs_percent: 0.9
+- area_name: 手柄-咖啡卡名
+  area_type: none
+  pc_rect:
+  - 190
+  - 844
+  - 1015
+  - 915
+- area_name: 手柄-当前咖啡详情
+  area_type: none
+  pc_rect:
+  - 1330
+  - 490
+  - 1650
+  - 630
+- area_name: 手柄-免费点单提示
+  area_type: none
+  pc_rect:
+  - 1430
+  - 884
+  - 1920
+  - 943
+- area_name: 手柄-咖啡列表返回
+  area_type: none
+  pc_rect:
+  - 1763
+  - 1010
+  - 1895
+  - 1054
+- area_name: 手柄-咖啡已喝文案
+  area_type: none
+  pc_rect:
+  - 760
+  - 473
+  - 1155
+  - 580
+- area_name: 手柄-咖啡已喝确认
+  area_type: none
+  pc_rect:
+  - 790
+  - 581
+  - 1130
+  - 678
+- area_name: 手柄-咖啡已喝选择
+  area_type: none
+  pc_rect:
+  - 885
+  - 678
+  - 1040
+  - 745

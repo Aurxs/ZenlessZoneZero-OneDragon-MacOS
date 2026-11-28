@@ -27,6 +27,14 @@ from zzz_od.application.zzz_application import ZApplication
 from zzz_od.context.zzz_context import ZContext
 from zzz_od.game_data.compendium import Coffee
 from zzz_od.operation.back_to_normal_world import BackToNormalWorld
+from zzz_od.operation.gamepad.coffee_menu import (
+    GamepadChooseCafeCoffee,
+    GamepadFinishAlreadyDrunkCoffee,
+    can_leave_coffee_menu,
+    can_order_free_coffee,
+    coffee_already_drunk_prompt,
+    read_coffee_selection,
+)
 from zzz_od.operation.gamepad.focus import has_filled_highlight
 from zzz_od.operation.gamepad.gamepad_operation import GamepadMenuDelayMixin
 from zzz_od.operation.gamepad.shop import (
@@ -49,8 +57,12 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
     STATUS_MACOS_EXTRA_COFFEE: ClassVar[str] = 'Mac 额外咖啡已完成'
     STATUS_MACOS_DIALOG_OPEN: ClassVar[str] = 'Mac 已在咖啡点单对话'
     STATUS_MACOS_REWARD_OPEN: ClassVar[str] = 'Mac 显式恢复电量奖励'
+    STATUS_MACOS_LIST_OPEN: ClassVar[str] = 'Mac 已在六分街咖啡列表'
+    STATUS_MACOS_LIST_ORDERED: ClassVar[str] = 'Mac 已提交六分街免费点单'
+    STATUS_MACOS_LIST_SETTLED: ClassVar[str] = 'Mac 六分街电量已确认'
+    STATUS_MACOS_LIST_DRUNK: ClassVar[str] = 'Mac 六分街识别今日已喝'
 
-    def __init__(self, ctx: ZContext, resume_from_charge_reward: bool = False):
+    def __init__(self, ctx: ZContext, resume_from_charge_reward: bool = False) -> None:
         """
         喝咖啡
         """
@@ -69,6 +81,8 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
         self.chosen_coffee: Coffee | None = None  # 选择的咖啡
         self.resume_from_charge_reward: bool = resume_from_charge_reward
         self.had_coffee_list: set[str] = set()  # 已经喝过的咖啡
+        self._macos_list_back_sent: bool = False
+        self._macos_list_drunk: bool = False
         self.turn_compensator: AngleTurnCompensator = AngleTurnCompensator(self.ctx.controller)
 
     def handle_init(self) -> None:
@@ -82,6 +96,8 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
             # 只保留本次执行已经点过的咖啡，跨日复用应用时重新读取游戏状态。
             self.chosen_coffee = None
             self.had_coffee_list.clear()
+            self._macos_list_back_sent = False
+            self._macos_list_drunk = False
 
     @node_from(from_name='等待咖啡店加载', success=False)
     @operation_node(name='传送', is_start_node=True)
@@ -90,6 +106,11 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
             if self._macos_energy_reward_visible():
                 return self.round_success(self.STATUS_MACOS_REWARD_OPEN)
             return self.round_fail('显式恢复咖啡奖励时未找到电量弹窗')
+        if sys.platform == 'darwin' and self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
+            if coffee_already_drunk_prompt(self):
+                return self.round_success(self.STATUS_MACOS_LIST_DRUNK)
+            if read_coffee_selection(self) is not None:
+                return self.round_success(self.STATUS_MACOS_LIST_OPEN)
         if self.previous_node.name == '等待咖啡店加载':
             if sys.platform == 'darwin':
                 return fail_shop_state(self, '咖啡店', self.previous_node.status or '进入手柄咖啡店失败')
@@ -108,8 +129,6 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
         if sys.platform == 'darwin':
             from zzz_od.operation.gamepad.transport import GamepadTransport
 
-            if self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
-                return self.round_fail(f'Mac 尚未支持咖啡店入口的转向移动：{item.value}')
             return self.round_by_op_result(
                 GamepadTransport(self.ctx, item.area_name, item.tp_name).execute()
             )
@@ -139,9 +158,13 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
     @node_from(from_name='传送')
     @operation_node(name='等待大世界加载', node_max_retry_times=60)
     def wait_world(self) -> OperationRoundResult:
-        result = self.round_by_find_area(self.last_screenshot, '咖啡店', '点单')
-        if result.is_success:
-            return self.round_success(result.status)
+        if sys.platform == 'darwin' and self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
+            if read_coffee_selection(self) is not None:
+                return self.round_success('点单')
+        else:
+            result = self.round_by_find_area(self.last_screenshot, '咖啡店', '点单')
+            if result.is_success:
+                return self.round_success(result.status)
 
         op = WaitNormalWorld(self.ctx, check_once=True)
         result = self.round_by_op_result(op.execute())
@@ -158,6 +181,10 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
         澄辉坪-汀曼咖啡 / 布亚斯特城区-片刻闲：传送落点已正对入口，直接交互
         :return:
         """
+        if sys.platform == 'darwin' and self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
+            from zzz_od.operation.gamepad.shop_approach import GamepadApproachShop
+
+            return self.round_by_op_result(GamepadApproachShop(self.ctx, '咖啡店').execute())
         if sys.platform != 'darwin' and self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:
             result = turn_to_angle(self, target_angle=180, turn_status='转向正西')
             if not result.is_success:
@@ -173,6 +200,10 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
     def wait_coffee_shop(self) -> OperationRoundResult:
         # 画面加载的时候，是滑动出现的，点单出现的时候，还未必能点击选中咖啡，因此要success_wait
         if self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value:  #六分街-咖啡店
+            if sys.platform == 'darwin':
+                if read_coffee_selection(self) is not None:
+                    return self.round_success()
+                return self.round_retry('等待六分街咖啡列表', wait=0.8)
             return self.round_by_find_area(self.last_screenshot, '咖啡店', '点单',
                                            success_wait=1, retry_wait=1)
 
@@ -284,11 +315,15 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
     @node_from(from_name='等待大世界加载', status='点单')
     @node_from(from_name='等待咖啡店加载')
     @node_from(from_name='电量确认', status=STATUS_EXTRA_COFFEE)
+    @node_from(from_name='传送', status=STATUS_MACOS_LIST_OPEN)
+    @node_from(from_name='核对手柄列表咖啡结果', status=STATUS_MACOS_EXTRA_COFFEE)
     @operation_node(name='选择咖啡')
     def choose_coffee(self) -> OperationRoundResult:
         if sys.platform == 'darwin':
-            candidates = ' / '.join(self._get_coffee_to_choose())
-            return fail_shop_state(self, '咖啡店', f'手柄咖啡列表焦点尚未建档：{candidates}')
+            result = GamepadChooseCafeCoffee(self.ctx, self._get_coffee_to_choose()).execute()
+            if result.success:
+                self.chosen_coffee = self.ctx.compendium_service.name_2_coffee[result.status]
+            return self.round_by_op_result(result)
         to_choose_list = self._get_coffee_to_choose()
 
         # from one_dragon.utils import debug_utils
@@ -354,7 +389,17 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
     @operation_node(name='点单')
     def order_coffee(self) -> OperationRoundResult:
         if sys.platform == 'darwin':
-            return fail_shop_state(self, '咖啡店', '手柄咖啡列表点单尚未建档')
+            current = read_coffee_selection(self)
+            if self.chosen_coffee is None or current is None or current[0] != self.chosen_coffee.coffee_name:
+                return fail_shop_state(self, '咖啡店', '点单前未确认当前焦点与所选咖啡一致')
+            if self.node_clicked or not can_order_free_coffee(self):
+                return fail_shop_state(self, '咖啡店', '未确认可用的每日免费点单')
+            if save_shop_frame(self, '咖啡店', '六分街免费点单前') is None:
+                return self.round_fail('未能保存六分街点单前画面')
+            self.node_clicked = True
+            self.ctx.controller.btn_tap('south')
+            self.had_coffee_list.add(self.chosen_coffee.coffee_name)
+            return self.round_success(self.STATUS_MACOS_LIST_ORDERED, wait=1)
         result = self.round_by_find_and_click_area(self.last_screenshot, '咖啡店', '点单')
         if result.is_success:
             self.had_coffee_list.add(self.chosen_coffee.coffee_name)
@@ -444,10 +489,30 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
 
         return self.round_retry(wait=1)
 
+    @node_from(from_name='点单', status=STATUS_MACOS_LIST_ORDERED)
+    @node_notify(when=NotifyTiming.CURRENT_SUCCESS)
+    @operation_node(name='核对手柄列表咖啡结果', node_max_retry_times=12, timeout_seconds=30)
+    def confirm_macos_list_order(self) -> OperationRoundResult:
+        if coffee_already_drunk_prompt(self):
+            return self.round_success(self.STATUS_MACOS_LIST_DRUNK)
+        result = self.charge_confirm()
+        if result.is_success and result.status != self.STATUS_MACOS_EXTRA_COFFEE:
+            return self.round_success(self.STATUS_MACOS_LIST_SETTLED)
+        return result
+
+    @node_from(from_name='传送', status=STATUS_MACOS_LIST_DRUNK)
+    @node_from(from_name='核对手柄列表咖啡结果', status=STATUS_MACOS_LIST_DRUNK)
+    @operation_node(name='六分街已喝咖啡返回', screenshot_before_round=False, timeout_seconds=25)
+    def finish_macos_coffee_list_already_drunk(self) -> OperationRoundResult:
+        result = GamepadFinishAlreadyDrunkCoffee(self.ctx).execute()
+        self._macos_list_drunk = result.success
+        return self.round_by_op_result(result)
+
     @node_from(from_name='不占用点单确认', status='不可贪杯确认')  # 已经喝过了
     @node_from(from_name='点单后跳过', status='不可贪杯确认')  # 已经喝过了
     @node_from(from_name='对话选咖啡', status='已喝过')  # 已经喝过了
     @node_from(from_name='电量确认')
+    @node_from(from_name='核对手柄列表咖啡结果', status=STATUS_MACOS_LIST_SETTLED)
     @operation_node(name='返回大世界')
     def back_to_world(self) -> OperationRoundResult:
         if sys.platform == 'darwin':
@@ -455,11 +520,20 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
             if result.is_success:
                 save_shop_frame(self, '咖啡店', '完成_返回大世界')
                 return self.round_success()
+            if (
+                self.config.transport_point == CoffeeTransportPoint.POINT_1.value.value
+                and not self._macos_list_back_sent
+                and read_coffee_selection(self) is not None
+                and can_leave_coffee_menu(self)
+            ):
+                self._macos_list_back_sent = True
+                self.ctx.controller.btn_tap('east')
             return self.round_retry('等待咖啡确认后返回大世界', wait=1)
         op = BackToNormalWorld(self.ctx)
         return self.round_by_op_result(op.execute())
 
     @node_from(from_name='返回大世界')
+    @node_from(from_name='六分街已喝咖啡返回')
     @operation_node(name='结束后运行体力计划')
     def charge_plan_afterwards(self) -> OperationRoundResult:
         if self.config.run_charge_plan_afterwards:
@@ -469,7 +543,7 @@ class CoffeeApp(GamepadMenuDelayMixin, ZApplication):
                 group_id=application_const.DEFAULT_GROUP_ID,
             )
             return self.round_by_op_result(op.execute())
-        return self.round_success('无需运行')
+        return self.round_success('今日已喝' if self._macos_list_drunk else '无需运行')
 
 
 def __debug():
