@@ -8,6 +8,9 @@ from one_dragon.base.operation.application import application_const
 from one_dragon.base.operation.operation_edge import node_from
 from one_dragon.base.operation.operation_node import operation_node
 from zzz_od.application.charge_plan import charge_plan_const
+from zzz_od.application.notorious_hunt.notorious_hunt_config import (
+    NotoriousHuntLevelEnum,
+)
 from zzz_od.operation.gamepad.charge_transport import (
     charge_mission_names,
     match_charge_mission,
@@ -34,6 +37,9 @@ if TYPE_CHECKING:
         ChargePlanItem,
     )
     from zzz_od.context.zzz_context import ZContext
+
+
+DEEP_HUNT_LEVELS: tuple[str, ...] = tuple(item.value.value for item in NotoriousHuntLevelEnum)
 
 
 class GamepadEnableDeepHunt(GamepadOperation):
@@ -133,6 +139,8 @@ class GamepadDeepHuntPrepare(GamepadHuntPrepare):
     @operation_node(name='核对挑战目标', is_start_node=True, node_max_retry_times=4)
     def check_target(self) -> OperationRoundResult:
         """未确认目标及模式不进入编队。"""
+        if self.plan.level not in DEEP_HUNT_LEVELS:
+            return self.round_fail('深度追猎计划难度无效')
         if self.plan.predefined_team_idx not in range(-1, 20):
             return self.round_fail('暂支持当前编队或二十个预备编队')
         if not deep_target_selected(self.ctx, self.last_screenshot, self.plan.mission_type_name):
@@ -148,14 +156,45 @@ class GamepadDeepHuntPrepare(GamepadHuntPrepare):
     @operation_node(name='选择计划难度', node_max_retry_times=10, timeout_seconds=20)
     def choose_level(self) -> OperationRoundResult:
         """体力计划默认等级沿用游戏当前值，显式等级复用已验证导航。"""
+        if self.plan.level not in DEEP_HUNT_LEVELS:
+            return self.round_fail('深度追猎计划难度无效')
         if self.plan.level == '默认等级':
             return self.round_success()
         return super().choose_level()
+
+    def _explicit_level_state(self) -> str:
+        """下一步前只接受标题栏唯一的完整等级，不把展开选项当已选中。"""
+        area = read_preset_area(self.ctx, self.last_screenshot, '手柄-页面文字', '恶名狩猎')
+        if area is None:
+            return 'wait'
+        levels: list[str] = []
+        for text, matches in area[1].items():
+            value = text.replace(' ', '')
+            level = re.fullmatch(r'(?:等级)?[Ll][Vv][.．](\d{1,3})', value)
+            if level is None:
+                continue
+            for match in matches:
+                if match.rect.center.x > 1400 and match.rect.center.y < 95:
+                    levels.append(f'等级Lv.{level[1]}')
+                elif match.rect.center.x > 1400:
+                    # 下拉框仍展开时，标题值不能作为完成选择的证明。
+                    return 'wait'
+        if len(levels) != 1:
+            return 'wait'
+        return 'ok' if levels[0] == self.plan.level else 'invalid'
 
     @node_from(from_name='选择计划难度')
     @operation_node(name='进入当前编队', node_max_retry_times=10, timeout_seconds=180)
     def prepare_deployment(self) -> OperationRoundResult:
         """出战页再次读取真实60消耗，不靠预估跳过检查。"""
+        if not self._next_sent and self.plan.level != '默认等级':
+            if not deep_target_selected(self.ctx, self.last_screenshot, self.plan.mission_type_name):
+                return self.round_fail('深度追猎目标或模式发生变化，未进入编队')
+            level = self._explicit_level_state()
+            if level == 'invalid':
+                return self.round_fail('深度追猎等级与计划不一致，未进入编队')
+            if level != 'ok':
+                return self.round_retry('等待已选定的唯一深度追猎等级', wait=1)
         charge = read_preset_charge(self.ctx, self.last_screenshot)
         if charge is None or charge[1] != 60:
             return self.round_retry('等待深度追猎电量核对', wait=1)
@@ -202,6 +241,8 @@ class GamepadDeepHunt(GamepadNotoriousHunt):
     def prepare(self) -> OperationRoundResult:
         if self.plan.tab_name != '训练' or self.plan.category_name != '恶名狩猎' or self.plan.mission_type_name not in charge_mission_names('恶名狩猎'):
             return self.round_fail('深度追猎目标不在原数据中')
+        if self.plan.level not in DEEP_HUNT_LEVELS:
+            return self.round_fail('深度追猎计划难度无效')
         if self.plan.plan_times <= self.plan.run_times or self.plan.run_times < 0:
             return self.round_fail('计划次数无效或已完成')
         mode = GamepadEnableDeepHunt(self.ctx, self.plan.mission_type_name).execute()

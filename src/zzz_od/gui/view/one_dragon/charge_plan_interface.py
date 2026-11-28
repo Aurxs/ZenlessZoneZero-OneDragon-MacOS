@@ -45,6 +45,7 @@ from zzz_od.application.charge_plan.charge_plan_config import (
 )
 from zzz_od.application.notorious_hunt.notorious_hunt_config import (
     NotoriousHuntBuffEnum,
+    NotoriousHuntLevelEnum,
 )
 from zzz_od.context.zzz_context import ZContext
 
@@ -75,6 +76,9 @@ class ChargePlanCard(DraggableListItem):
 
         self.card_num_box = ComboBox()
         self.card_num_box.currentIndexChanged.connect(self._on_card_num_changed)
+
+        self.level_combo_box = ComboBox()
+        self.level_combo_box.currentIndexChanged.connect(self._on_level_changed)
 
         self.notorious_hunt_buff_num_opt = ComboBox()
         self.notorious_hunt_buff_num_opt.currentIndexChanged.connect(self.on_notorious_hunt_buff_num_changed)
@@ -113,6 +117,7 @@ class ChargePlanCard(DraggableListItem):
                     self.auto_battle_combo_box,
                 ],
                 [
+                    self.level_combo_box,
                     run_times_label,
                     self.run_times_input,
                     plan_times_label,
@@ -166,6 +171,11 @@ class ChargePlanCard(DraggableListItem):
         self.notorious_hunt_buff_num_opt.set_items(config_list, self.plan.notorious_hunt_buff_num)
         self.notorious_hunt_buff_num_opt.setVisible(self.plan.category_name == '恶名狩猎')
 
+    def init_level_combo_box(self) -> None:
+        """体力恶名两平台均执行具体等级；默认保留游戏当前等级。"""
+        self.level_combo_box.set_items([item.value for item in NotoriousHuntLevelEnum], self.plan.level)
+        self.level_combo_box.setVisible(self.plan.category_name == '恶名狩猎')
+
     def init_predefined_team_opt(self) -> None:
         """
         初始化预备编队的下拉框
@@ -211,6 +221,7 @@ class ChargePlanCard(DraggableListItem):
         self.init_mission_combo_box()
 
         self.init_card_num_box()
+        self.init_level_combo_box()
         self.init_notorious_hunt_buff_num_opt()
         self.init_predefined_team_opt()
         self.init_auto_battle_box()
@@ -229,6 +240,7 @@ class ChargePlanCard(DraggableListItem):
         self.init_mission_type_combo_box()
         self.init_mission_combo_box()
         self.init_card_num_box()
+        self.init_level_combo_box()
         self.init_notorious_hunt_buff_num_opt()
         self.init_predefined_team_opt()
         self.init_auto_battle_box()
@@ -251,6 +263,11 @@ class ChargePlanCard(DraggableListItem):
 
     def _on_card_num_changed(self, idx: int) -> None:
         self.plan.card_num = self.card_num_box.itemData(idx)
+        self._emit_value()
+
+    def _on_level_changed(self, idx: int) -> None:
+        """沿原卡片通知链保存用户选择，不修改其他计划参数。"""
+        self.plan.level = self.level_combo_box.itemData(idx)
         self._emit_value()
 
     def on_notorious_hunt_buff_num_changed(self, idx: int) -> None:

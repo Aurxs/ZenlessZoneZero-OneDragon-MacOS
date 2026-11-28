@@ -25,7 +25,11 @@ from zzz_od.operation.gamepad.charge_transport import (
 )
 from zzz_od.operation.gamepad.combat_simulation import GamepadCombatSimulation
 from zzz_od.operation.gamepad.configure_cards import GamepadConfigureCards
-from zzz_od.operation.gamepad.deep_hunt import GamepadDeepHunt, GamepadEnableDeepHunt
+from zzz_od.operation.gamepad.deep_hunt import (
+    DEEP_HUNT_LEVELS,
+    GamepadDeepHunt,
+    GamepadEnableDeepHunt,
+)
 from zzz_od.operation.gamepad.double_reward import (
     GamepadCheckDoubleReward,
     make_double_reward_plan,
@@ -105,12 +109,15 @@ def validate_macos_charge_plan(config: ChargePlanConfig) -> str | None:
                 continue
             if plan.category_name == '区域巡防' and field == 'level':
                 values = ('默认等级', '等级Lv.60')
+            if plan.category_name == '恶名狩猎' and field == 'level':
+                values = DEEP_HUNT_LEVELS
             value = getattr(plan, field)
             if value not in values:
                 return (
                     f'Mac 体力计划第 {index} 项的{labels[field]}“{value}”尚未支持；'
                     '目前仅支持训练/实战模拟室/基础/晋升/音擎改装/技能材料、默认等级、'
-                    '默认保留已保存数量、1至5张卡片，或区域巡防/专业挑战室普通副本；当前编队或二十个预备编队'
+                    '默认保留已保存数量、1至5张卡片，或区域巡防/专业挑战室普通副本；'
+                    '恶名深度追猎支持默认或Lv.30/40/50/60/65；当前编队或二十个预备编队'
                 )
         if plan.category_name in ('区域巡防', '专业挑战室', '恶名狩猎') and not plan.is_agent_plan and plan.mission_type_name not in charge_mission_names(plan.category_name):
             return f'Mac 体力计划第 {index} 项的副本“{plan.category_name}/{plan.mission_type_name}”不在原数据中'
