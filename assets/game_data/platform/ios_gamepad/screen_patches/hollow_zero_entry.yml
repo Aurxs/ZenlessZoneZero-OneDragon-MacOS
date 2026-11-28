@@ -21,3 +21,160 @@ added_areas:
   - 795
   - 1695
   - 970
+- area_name: 手柄-枯萎区域列表
+  area_type: none
+  pc_rect:
+  - 168
+  - 195
+  - 1775
+  - 867
+- area_name: 手柄-枯萎区域底栏
+  area_type: none
+  pc_rect:
+  - 920
+  - 987
+  - 1839
+  - 1063
+- area_name: 手柄-资质考核焦点
+  area_type: none
+  pc_rect:
+  - 235
+  - 402
+  - 305
+  - 454
+- area_name: 手柄-旧都列车焦点
+  area_type: none
+  pc_rect:
+  - 628
+  - 545
+  - 707
+  - 600
+- area_name: 手柄-施工废墟焦点
+  area_type: none
+  pc_rect:
+  - 707
+  - 132
+  - 783
+  - 184
+- area_name: 手柄-施工难度列表
+  area_type: none
+  pc_rect:
+  - 1090
+  - 151
+  - 1880
+  - 882
+- area_name: 手柄-施工难度底栏
+  area_type: none
+  pc_rect:
+  - 1298
+  - 987
+  - 1849
+  - 1060
+- area_name: 手柄-六人编队标识
+  area_type: none
+  pc_rect:
+  - 210
+  - 105
+  - 1510
+  - 632
+- area_name: 手柄-六人编队底栏
+  area_type: none
+  pc_rect:
+  - 56
+  - 988
+  - 1850
+  - 1065
+- area_name: 手柄-施工下一步
+  area_type: none
+  pc_rect:
+  - 1668
+  - 995
+  - 1790
+  - 1058
+- area_name: 手柄-速刷续接弹窗
+  area_type: none
+  pc_rect:
+  - 626
+  - 470
+  - 1300
+  - 681
+- area_name: 手柄-速刷续接按键
+  area_type: template
+  pc_rect:
+  - 896
+  - 676
+  - 978
+  - 742
+  template_sub_dir: ios_gamepad
+  template_id: dialog_a
+  template_match_threshold: 0.65
+- area_name: 手柄-棋盘压力
+  area_type: none
+  pc_rect:
+  - 744
+  - 952
+  - 863
+  - 1042
+- area_name: 手柄-棋盘硬币
+  area_type: none
+  pc_rect:
+  - 1222
+  - 979
+  - 1300
+  - 1024
+- area_name: 手柄-棋盘商人入口
+  area_type: none
+  pc_rect:
+  - 1240
+  - 722
+  - 1918
+  - 849
+- area_name: 手柄-速刷结算标题
+  area_type: none
+  pc_rect:
+  - 57
+  - 23
+  - 475
+  - 103
+- area_name: 手柄-速刷结算进度
+  area_type: none
+  pc_rect:
+  - 1295
+  - 208
+  - 1881
+  - 465
+- area_name: 手柄-速刷完成按键
+  area_type: none
+  pc_rect:
+  - 1745
+  - 992
+  - 1907
+  - 1065
+- area_name: 手柄-速刷结算奖励
+  area_type: none
+  pc_rect:
+  - 1305
+  - 530
+  - 1828
+  - 858
+- area_name: 手柄-棋盘S门提示
+  area_type: none
+  pc_rect:
+  - 1230
+  - 730
+  - 1918
+  - 839
+- area_name: 手柄-局内业绩获得
+  area_type: none
+  pc_rect:
+  - 804
+  - 376
+  - 1115
+  - 848
+- area_name: 手柄-棋盘鸣徽数量
+  area_type: none
+  pc_rect:
+  - 86
+  - 602
+  - 145
+  - 646

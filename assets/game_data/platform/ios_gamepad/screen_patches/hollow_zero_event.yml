@@ -1,0 +1,159 @@
+screen_id: hollow_zero_event
+area_patches:
+  呼叫增援-角色行:
+    pc_rect:
+    - 1244
+    - 422
+    - 1634
+    - 477
+added_areas:
+- area_name: 手柄-走格层数
+  area_type: none
+  pc_rect:
+  - 315
+  - 22
+  - 486
+  - 80
+- area_name: 手柄-走格背包
+  area_type: none
+  pc_rect:
+  - 1425
+  - 963
+  - 1596
+  - 1026
+- area_name: 手柄-速刷鸣徽
+  area_type: none
+  pc_rect:
+  - 285
+  - 115
+  - 1690
+  - 817
+- area_name: 手柄-速刷右侧事件
+  area_type: none
+  pc_rect:
+  - 1090
+  - 117
+  - 1917
+  - 852
+- area_name: 手柄-速刷继续提示
+  area_type: template
+  pc_rect:
+  - 1770
+  - 507
+  - 1915
+  - 626
+  template_sub_dir: ios_gamepad
+  template_id: dialog_a
+  template_match_threshold: 0.65
+- area_name: 手柄-速刷战况页签
+  area_type: none
+  pc_rect:
+  - 1295
+  - 9
+  - 1880
+  - 98
+- area_name: 手柄-速刷战况副本
+  area_type: none
+  pc_rect:
+  - 454
+  - 160
+  - 828
+  - 233
+- area_name: 手柄-速刷战况底栏
+  area_type: none
+  pc_rect:
+  - 1350
+  - 989
+  - 1901
+  - 1065
+- area_name: 手柄-速刷退出弹窗
+  area_type: none
+  pc_rect:
+  - 640
+  - 473
+  - 1282
+  - 684
+- area_name: 手柄-速刷商店返回
+  area_type: none
+  pc_rect:
+  - 1695
+  - 679
+  - 1815
+  - 757
+- area_name: 手柄-速刷结果
+  area_type: none
+  pc_rect:
+  - 740
+  - 472
+  - 1174
+  - 583
+- area_name: 手柄-速刷结果按钮
+  area_type: none
+  pc_rect:
+  - 818
+  - 581
+  - 1100
+  - 691
+- area_name: 手柄-速刷结果提示
+  area_type: none
+  pc_rect:
+  - 906
+  - 687
+  - 1045
+  - 762
+- area_name: 手柄-速刷鸣徽刷新
+  area_type: none
+  pc_rect:
+  - 1466
+  - 9
+  - 1880
+  - 84
+- area_name: 手柄-速刷插件奖励
+  area_type: none
+  pc_rect:
+  - 740
+  - 369
+  - 1183
+  - 671
+- area_name: 手柄-速刷插件奖励按钮
+  area_type: none
+  pc_rect:
+  - 818
+  - 680
+  - 1100
+  - 778
+- area_name: 手柄-速刷插件奖励提示
+  area_type: none
+  pc_rect:
+  - 904
+  - 776
+  - 1050
+  - 861
+- area_name: 手柄-速刷战利品确定
+  area_type: none
+  pc_rect:
+  - 821
+  - 802
+  - 1099
+  - 891
+- area_name: 手柄-速刷战利品鸣徽
+  area_type: none
+  pc_rect:
+  - 827
+  - 510
+  - 1094
+  - 560
+- area_name: 手柄-速刷音频卡标题
+  area_type: none
+  pc_rect:
+  - 820
+  - 60
+  - 1110
+  - 132
+- area_name: 手柄-速刷音频卡返回
+  area_type: none
+  pc_rect:
+  - 980
+  - 992
+  - 1100
+  - 1055

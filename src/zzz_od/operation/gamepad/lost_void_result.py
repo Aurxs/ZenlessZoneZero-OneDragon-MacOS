@@ -41,6 +41,7 @@ class GamepadLostVoidBattleResult(GamepadOperation):
 
     def __init__(
         self, ctx: ZContext, investigation_completed: bool = False, read_cycle_rewards: bool = False,
+        mid_result_only: bool = False,
     ) -> None:
         super().__init__(ctx, op_name='手柄迷失之地挑战结果', timeout_seconds=25)
         self.navigation: GamepadTransportByCompendium = GamepadTransportByCompendium(
@@ -51,6 +52,7 @@ class GamepadLostVoidBattleResult(GamepadOperation):
         self._next_region: str | None = None
         self.investigation_completed: bool = investigation_completed
         self.read_cycle_rewards: bool = read_cycle_rewards
+        self.mid_result_only: bool = mid_result_only
         self._cycle_sample: tuple[tuple[str, ...], LostVoidCycleProgress] | None = None
         self._cycle_checks: int = 0
         self._cycle_progress: LostVoidCycleProgress | None = None
@@ -114,7 +116,7 @@ class GamepadLostVoidBattleResult(GamepadOperation):
             key = 'south'
             self._status = LostVoidRunLevel.STATUS_NEXT_LEVEL
             self._next_region = LostVoidRegionType.FRIENDLY_TALK.value.value
-        elif self._has_result_action(actions, 'B', '完成'):
+        elif not self.mid_result_only and self._has_result_action(actions, 'B', '完成'):
             if not won:
                 gain = nav._read_area('迷失之地-挑战结果', '手柄-最终结晶')
                 values = (
